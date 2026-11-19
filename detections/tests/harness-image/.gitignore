@@ -1,0 +1,4 @@
+# 构建输入：fetch-refs.sh 下载的 MITRE 参考数据，只进镜像不进仓库
+enterprise-attack.json
+d3fend.json
+*.part

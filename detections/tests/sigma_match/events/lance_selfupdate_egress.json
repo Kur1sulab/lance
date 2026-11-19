@@ -1,0 +1,9 @@
+{
+  "note": "forward-proxy egress log. The rule matches c-useragent EXACTLY equal to 'lance-selfupdate' (selfupdate/github.go), the UA LANCE sets when it fetches its own release from GitHub. A generic client UA must not match.",
+  "positive": [
+    {"c-useragent": "lance-selfupdate", "cs-host": "github.com", "cs-uri-stem": "/Kur1sulab/LANCE/releases/latest"}
+  ],
+  "negative": [
+    {"c-useragent": "curl/8.5.0", "cs-host": "github.com", "cs-uri-stem": "/"}
+  ]
+}

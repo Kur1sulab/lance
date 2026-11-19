@@ -1,0 +1,37 @@
+# pre-commit 配置示例（官方文档：https://pre-commit.com）
+#
+# 把仓库 CI 里两道确定性的合并门禁提前到本地提交阶段跑一遍，坏掉的改动在推送前
+# 就被拦住。任何一个钩子的断言失败都会以非 0 退出码结束，提交随之中止。
+#
+# 1) detections —— 只在「探测规则(detections/)或其规则所固定的上游源码」以及「防护指南里
+#    的内联 Sigma 模板(docs/defense-{zh,en}.md)」发生变更的提交上触发，一次性跑完八套
+#    探测测试和三道门禁的 runner(detections/tests/run-all.sh)。它与 CI
+#    (.github/workflows/detections.yml)用同一套规则和源码范围先过一遍，专门抓「只改规则
+#    不更新测试/分层」或者「改了防护模板却不更新指南里对应断言」的改动。依赖是 Docker
+#    （每套测试都在容器里隔离执行，runner 本机不装任何东西）。
+# 2) docs —— 检查被跟踪的 markdown 文档里指向仓库内部的链接、图片和锚点(#标题)引用是否
+#    仍然指向真实存在的对象(scripts/check-doc-links.py)。与 CI(.github/workflows/docs.yml)
+#    的检查一致；那边不带 paths 过滤、对任何改动都跑，所以这里同样不缩小目标文件范围
+#    (always_run)。链接不只在改 .md 时会坏，删掉或挪走它指向的文件（图片、LICENSE 等）
+#    时一样会坏。只用 Python 标准库、不联网，没有 Docker 也能在几十毫秒内跑完。
+#
+# 安装：      pip install pre-commit && pre-commit install
+# 手动执行：  pre-commit run detections --all-files
+#            pre-commit run docs --all-files
+#
+# 这里只挂两个钩子的最小示例。想把 Go / 前端 lint 也一起挂上，在下面各自追加即可。
+repos:
+  - repo: local
+    hooks:
+      - id: detections
+        name: 探测规则测试 8 套（Sigma·Suricata·ATT&CK·指标·MISP）
+        entry: detections/tests/run-all.sh
+        language: script
+        pass_filenames: false
+        files: '^(detections/|enrich/enrich\.go|selfupdate/(github|stage)\.go|guard/guard\.go|db/db\.go|db/schema\.sql|cmd/lance/main\.go|traffic/traffic\.go|docs/defense-(zh|en)\.md)'
+      - id: docs
+        name: 文档内部链接·图片·锚点(#标题)完整性检查
+        entry: python3 -I scripts/check-doc-links.py
+        language: system
+        pass_filenames: false
+        always_run: true

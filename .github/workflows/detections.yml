@@ -1,0 +1,88 @@
+name: detections
+# 每次推送/PR 改动检测规则（Sigma·Suricata·ATT&CK 覆盖层）时，用可复现测试验证：
+# 规则确实会触发、能转换到多个 SIEM 后端、覆盖层与规则一致、指标仍与上游源对齐，
+# 并通过 SigmaHQ 全量惯例校验。只改规则而不更新测试与覆盖层的改动，会在这里变红。
+# CONTRIBUTING.md 与 detections/tests/README.md 承诺的「八套测试把贡献契约机械化」
+# 由本工作流兑现为合并门禁。Go 构建、静态分析与单测由 ci.yml 负责。
+#
+# 除八套规则测试外，同一合并门禁还跑三个非规则门禁：测试骨架注册表同步检查、
+# 主机分类工具（detections/triage/lance_host_triage.py）自测、以及防御指南
+# （docs/defense-{zh,en}.md）正文中内联 Sigma 关联模板的一致性检查。
+# 第三个门禁复现指南里断言的事实（sigma check 通过、splunk/eql/loki 转换、
+# lucene/kusto 关联不支持、zh/en 规则正文一致），把上游 sigma-cli 与后端升级
+# 导致说明文字悄悄过期的情况挡在合并门禁上。
+#
+# 八套测试只需要 Docker（ubuntu-latest 运行器自带）。运行器拉取
+# sigma-cli·scapy·suricata·python 镜像在容器里隔离执行，运行器本身不装任何东西；
+# 规则树与指标引用的源文件只读挂载，不写入仓库。除 detections/ 下的改动外，
+# 指标测试所固定的源文件变动时也会触发——enrich·selfupdate·guard·db 的
+# User-Agent·标记·破坏性命令词表，cmd/lance/main.go 的默认监听与代理端口，
+# traffic/traffic.go 的 MITM CA 证书文件名，db/schema.sql 的探索图谱 schema 指纹。
+# 公开镜像在无认证下下载，偶尔会撞 Docker Hub 限速，重跑作业即可恢复。
+on:
+  push:
+    paths:
+      - "detections/**"
+      - "enrich/enrich.go"
+      - "selfupdate/github.go"
+      - "selfupdate/stage.go"
+      - "guard/guard.go"
+      - "db/db.go"
+      - "db/schema.sql"
+      - "cmd/lance/main.go"
+      - "traffic/traffic.go"
+      # 第三个门禁（防御模板一致性检查）读取的两个文件，改动即需重验。
+      - "docs/defense-zh.md"
+      - "docs/defense-en.md"
+      - ".github/workflows/detections.yml"
+  pull_request:
+    paths:
+      - "detections/**"
+      - "enrich/enrich.go"
+      - "selfupdate/github.go"
+      - "selfupdate/stage.go"
+      - "guard/guard.go"
+      - "db/db.go"
+      - "db/schema.sql"
+      - "cmd/lance/main.go"
+      - "traffic/traffic.go"
+      - "docs/defense-zh.md"
+      - "docs/defense-en.md"
+      - ".github/workflows/detections.yml"
+
+permissions:
+  contents: read
+
+# 同一分支有新推送时取消前一次运行，避免频繁推送时堆积无谓的执行。
+concurrency:
+  group: detections-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  detections:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: 测试骨架注册表同步检查（run-all.sh ↔ CI ↔ 目录）
+        run: detections/tests/check-harness-sync.sh
+      - name: 主机分类工具自测（lance_host_triage.py --self-test · 非规则门禁）
+        run: detections/tests/triage-selftest.sh
+      - name: 防御指南内联 Sigma 模板一致性检查（sigma check·转换矩阵·zh/en 正文一致 · 非规则门禁）
+        run: detections/tests/check-defense-template.sh
+      - name: Sigma 规则可复现测试（sigma check + 后端转换 + 指标保留）
+        run: detections/tests/sigma/run.sh
+      - name: Sigma 真实事件匹配测试（原子/关联规则对恶意样本与时间线触发、对正常流量沉默）
+        run: detections/tests/sigma_match/run.sh
+      - name: Sigma SigmaHQ 惯例 lint（完整校验器集 + 文档化基线）
+        run: detections/tests/sigma_lint/run.sh
+      - name: Sigma 后端可移植性测试（关联规则能否在多个后端转换）
+        run: detections/tests/sigma_backends/run.sh
+      - name: Suricata 规则可复现测试（合成 pcap → suricata -r → 断言告警数）
+        run: detections/tests/suricata/run.sh
+      - name: ATT&CK 覆盖层 ↔ 规则一致性测试
+        run: detections/tests/attack/run.sh
+      - name: 检测指标 ↔ 上游源一致性测试（上游重同步漂移护栏）
+        run: detections/tests/indicators/run.sh
+      - name: 指标 MISP 导出 ↔ CSV 同步测试（用 pymisp 校验 MISP 格式有效性）
+        run: detections/tests/misp/run.sh

@@ -1,0 +1,473 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+/* Theme preset styles: these override CSS variables based on the selected data-theme-preset */
+@import "../styles/presets/brutalist.css";
+@import "../styles/presets/soft-pop.css";
+@import "../styles/presets/tangerine.css";
+@import "../styles/presets/lance.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --font-heading: var(--font-sans);
+  --font-sans: var(--font-sans);
+}
+
+/* Default theme styles (used when no data-theme-preset is set or when 'default' is selected).
+These serve as the fallback; there is no separate default.css file. */
+:root {
+  --radius: 0.625rem;
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
+
+  /* fonts */
+  --font-sans: var(--font-geist);
+  --font-mono: var(--font-geist-mono);
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+}
+
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-sans), system-ui, sans-serif;
+  }
+  html {
+    @apply font-sans;
+  }
+}
+
+@layer utilities {
+  [data-theme-preset]:not([data-theme-preset="default"]) .shadow-2xs {
+    box-shadow: var(--shadow-2xs);
+  }
+
+  [data-theme-preset]:not([data-theme-preset="default"]) .shadow-xs {
+    box-shadow: var(--shadow-xs);
+  }
+
+  [data-theme-preset]:not([data-theme-preset="default"]) .shadow-sm {
+    box-shadow: var(--shadow-sm);
+  }
+
+  [data-theme-preset]:not([data-theme-preset="default"]) .shadow {
+    box-shadow: var(--shadow);
+  }
+
+  [data-theme-preset]:not([data-theme-preset="default"]) .shadow-md {
+    box-shadow: var(--shadow-md);
+  }
+
+  [data-theme-preset]:not([data-theme-preset="default"]) .shadow-lg {
+    box-shadow: var(--shadow-lg);
+  }
+
+  [data-theme-preset]:not([data-theme-preset="default"]) .shadow-xl {
+    box-shadow: var(--shadow-xl);
+  }
+
+  [data-theme-preset]:not([data-theme-preset="default"]) .shadow-2xl {
+    box-shadow: var(--shadow-2xl);
+  }
+
+  html[data-font="inter"] body {
+    --font-sans: var(--font-inter);
+  }
+  html[data-font="notoSans"] body {
+    --font-sans: var(--font-noto-sans);
+  }
+  html[data-font="nunitoSans"] body {
+    --font-sans: var(--font-nunito-sans);
+  }
+  html[data-font="figtree"] body {
+    --font-sans: var(--font-figtree);
+  }
+  html[data-font="roboto"] body {
+    --font-sans: var(--font-roboto);
+  }
+  html[data-font="geist"] body {
+    --font-sans: var(--font-geist);
+  }
+  html[data-font="raleway"] body {
+    --font-sans: var(--font-raleway);
+  }
+  html[data-font="dmSans"] body {
+    --font-sans: var(--font-dm-sans);
+  }
+  html[data-font="publicSans"] body {
+    --font-sans: var(--font-public-sans);
+  }
+  html[data-font="outfit"] body {
+    --font-sans: var(--font-outfit);
+  }
+  html[data-font="geistMono"] body {
+    --font-sans: var(--font-geist-mono);
+  }
+  html[data-font="geistPixelSquare"] body {
+    --font-sans: var(--font-geist-pixel-square);
+  }
+  html[data-font="jetBrainsMono"] body {
+    --font-sans: var(--font-jetbrains-mono);
+  }
+  html[data-font="notoSerif"] body {
+    --font-sans: var(--font-noto-serif);
+  }
+  html[data-font="robotoSlab"] body {
+    --font-sans: var(--font-roboto-slab);
+  }
+  html[data-font="merriweather"] body {
+    --font-sans: var(--font-merriweather);
+  }
+  html[data-font="lora"] body {
+    --font-sans: var(--font-lora);
+  }
+  html[data-font="playfairDisplay"] body {
+    --font-sans: var(--font-playfair-display);
+  }
+}
+
+html {
+  overscroll-behavior: none;
+}
+
+.disable-transitions * {
+  transition: none !important;
+}
+
+[data-print-root] {
+  display: none;
+}
+
+@media print {
+  @page {
+    size: Letter;
+    margin: 0;
+  }
+
+  html,
+  body {
+    width: 8.5in !important;
+    height: 11in !important;
+    margin: 0 !important;
+    overflow: hidden !important;
+  }
+
+  body > *:not([data-print-root]) {
+    display: none !important;
+  }
+
+  [data-print-root] {
+    display: block !important;
+    width: 8.5in !important;
+    height: 11in !important;
+    margin: 0 !important;
+    overflow: hidden !important;
+    background: white !important;
+  }
+
+  [data-print-root] [data-print-paper] {
+    width: 8.5in !important;
+    height: 11in !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+  }
+
+  [data-print-root] [data-print-paper],
+  [data-print-root] [data-print-paper] * {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+}
+
+/* ============================================================
+   Lance 机甲装饰层（仅 data-theme-preset="lance" 生效）
+   全部是几何与排版，没有光斑/渐变背景装饰
+   ============================================================ */
+
+:root[data-theme-preset="lance"] body {
+  /* 极淡网格：24px 一格，只是给纯色底一点「仪表盘」底纹 */
+  background-image:
+    linear-gradient(to right, color-mix(in oklab, var(--border) 60%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in oklab, var(--border) 60%, transparent) 1px, transparent 1px);
+  background-size: 24px 24px;
+  background-attachment: fixed;
+}
+
+/* 顶栏：左侧 132px 一段 45° 铭牌条纹（不再贯穿全宽，避免斑马线感） */
+:root[data-theme-preset="lance"] header {
+  position: relative;
+}
+:root[data-theme-preset="lance"] header::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 96px;
+  height: 3px;
+  background-image: repeating-linear-gradient(
+    45deg,
+    var(--foreground) 0 5px,
+    transparent 5px 11px
+  );
+  opacity: 0.4;
+  pointer-events: none;
+}
+/* 顶栏底部一条极淡的基线，替代整条条纹 */
+:root[data-theme-preset="lance"] header::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: var(--border);
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+/* 页面标题：左侧粗竖条（日式字幕框） */
+:root[data-theme-preset="lance"] main h1::before {
+  content: "";
+  display: inline-block;
+  width: 3px;
+  height: 0.82em;
+  margin-right: 10px;
+  vertical-align: -0.06em;
+  background: var(--foreground);
+}
+
+/* 卡片：默认几乎看不见角标，hover 才亮，避免整页都是框 */
+:root[data-theme-preset="lance"] [data-slot="card"] {
+  position: relative;
+  border-color: transparent;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--border) 55%, transparent);
+  transition: box-shadow 0.16s ease;
+}
+:root[data-theme-preset="lance"] [data-slot="card"]:hover {
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--border) 40%, var(--foreground));
+}
+:root[data-theme-preset="lance"] [data-slot="card"]::before,
+:root[data-theme-preset="lance"] [data-slot="card"]::after {
+  content: "";
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-color: var(--foreground);
+  border-style: solid;
+  opacity: 0.18;
+  transition: opacity 0.16s ease;
+  pointer-events: none;
+}
+:root[data-theme-preset="lance"] [data-slot="card"]:hover::before,
+:root[data-theme-preset="lance"] [data-slot="card"]:hover::after {
+  opacity: 0.6;
+}
+:root[data-theme-preset="lance"] [data-slot="card"]::before {
+  top: -1px;
+  left: -1px;
+  border-width: 1px 0 0 1px;
+}
+:root[data-theme-preset="lance"] [data-slot="card"]::after {
+  right: -1px;
+  bottom: -1px;
+  border-width: 0 1px 1px 0;
+}
+
+/* 实心按钮切角 */
+:root[data-theme-preset="lance"] button.bg-primary,
+:root[data-theme-preset="lance"] a.bg-primary {
+  clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px));
+}
+
+/* 输入框/下拉：左侧 2px 竖线导轨 */
+:root[data-theme-preset="lance"] input:not([type="checkbox"]):not([type="radio"]),
+:root[data-theme-preset="lance"] textarea,
+:root[data-theme-preset="lance"] [data-slot="select-trigger"] {
+  box-shadow: inset 2px 0 0 0 color-mix(in oklab, var(--foreground) 40%, transparent);
+}
+
+/* 侧栏：分组标题 // 前缀、选中项左导轨、品牌编号 */
+:root[data-theme-preset="lance"] [data-slot="sidebar"] [data-sidebar="group-label"]::before {
+  content: "// ";
+  opacity: 0.5;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+:root[data-theme-preset="lance"] [data-slot="sidebar"] [data-sidebar="menu-button"][data-active="true"] {
+  box-shadow: inset 2px 0 0 0 var(--foreground);
+}
+:root[data-theme-preset="lance"] [data-slot="sidebar"] [data-sidebar="header"] span.font-semibold::after {
+  content: " // UNIT-01";
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: var(--muted-foreground);
+  opacity: 0.75;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+/* 所有数字：等宽 + 对齐（统计卡、表格、版本号） */
+:root[data-theme-preset="lance"] body {
+  font-variant-numeric: tabular-nums;
+}
+:root[data-theme-preset="lance"] .font-mono,
+:root[data-theme-preset="lance"] code,
+:root[data-theme-preset="lance"] kbd {
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+/* 表头：铭牌式大写小字 */
+:root[data-theme-preset="lance"] thead th {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+
+/* disabled：描边待激活，避免纯黑底上出现一块死灰 */
+:root[data-theme-preset="lance"] button:disabled,
+:root[data-theme-preset="lance"] button[aria-disabled="true"] {
+  background: transparent !important;
+  border: 1px solid var(--border) !important;
+  color: var(--muted-foreground) !important;
+  box-shadow: none !important;
+}
+
+/* 内容区顶部数据刻度尺：每 24px 一齿，像仪表盘标尺 */
+:root[data-theme-preset="lance"] [data-cockpit]::before {
+  content: "";
+  display: block;
+  height: 7px;
+  margin: -4px 0 14px;
+  background-image: repeating-linear-gradient(
+    to right,
+    color-mix(in oklab, var(--foreground) 30%, transparent) 0 1px,
+    transparent 1px 24px
+  );
+  background-position: 0 bottom;
+  background-size: 24px 7px;
+  background-repeat: repeat-x;
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+/* 收起状态：图标轨加分隔线，选中项整块反白（机甲按键） */
+:root[data-theme-preset="lance"] [data-slot="sidebar"][data-collapsible="icon"] [data-sidebar="menu-button"][data-active="true"] {
+  background: var(--foreground);
+  color: var(--background);
+  box-shadow: none;
+}
+:root[data-theme-preset="lance"] [data-slot="sidebar"][data-collapsible="icon"] [data-sidebar="menu-button"][data-active="true"] svg {
+  color: var(--background);
+}
+
+/* 滚动条：不要自绘 webkit 滚动条（backdrop-filter 容器会出白方块） */
+:root[data-theme-preset="lance"] * {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}

@@ -1,0 +1,93 @@
+# backend
+/data/
+*.db
+*.db-wal
+*.db-shm
+config.json
+scheduler_state.json
+__pycache__/
+*.pyc
+*.pyo
+
+# frontend
+web/node_modules/
+web/.next/
+web/tsconfig.tsbuildinfo
+web/next-env.d.ts
+*.local
+
+# development tools
+.playwright-mcp/
+.playwright-cli/
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# os
+.DS_Store
+Thumbs.db
+
+# claude code local state
+.claude/
+
+# 内嵌前端的单二进制产物
+/lance
+# 一键更新在可执行文件旁留下的中间产物（暂存件 / 备份 / 失败版本 / 升级标记）
+/lance.new
+/lance.new.sha256
+/lance.old
+/lance.failed
+/lance.upgrade.json
+/server/webui/dist/
+/dist/
+
+# JWT 签名密钥（运行时生成，存项目根，绝不提交）
+/jwt.key
+
+# Docker 部署生成的本地环境（含密码/密钥，不提交）
+.env
+
+# 调度器运行/模拟产生的事件日志（测试产物，不提交）
+*-events.csv
+
+# bench 基准测试相关（本地产物，不提交）
+/bench/
+/Dockerfile.bench
+/Dockerfile.bench.v2
+# --- 本地运行产物：禁止提交（测试/扫描结果不外发） ---
+work/
+test-results/
+scan-output/
+evidence-local/
+# 本地启动演示应用产生的运行时数据（录制代理的流量索引库、mitmproxy CA 私钥等），
+# 不提交到公开仓库。
+/demo-data/
+*.local.env
+# D2 模型对比实网测试：位于 package agent 内部，只能放在 work/ 之外；
+# 会消耗 API key 与网络，属本地专用产物，不提交到公开仓库。
+# 只挡精确路径，避免影响上游追踪测试。
+agent/d2_models_live_test.go
+
+# API key·密钥：无论放在哪里都不提交
+*.env
+secrets.env
+
+# --- Windows 源码构建的本地产物：不提交 ---
+# go build -o lance.exe 生成的 Windows 单文件二进制（与 Unix 版 /lance 对应）
+/lance.exe
+# 本地配置里用到的密钥（例如 PostgreSQL 密码），绝不提交。
+/.secrets/
+# 把 SWC_NATIVE_BINDING_CACHE 指到项目内时产生的原生绑定缓存
+/.swc-cache/
+# 前台启动 lance.exe 时重定向出来的运行日志
+/lance.out.log
+/lance.err.log
+
+# 本地二开物料（不进仓库）
+/docs/upstream-reference/
+/tools/
+/dev/
+
+# 内部改造工作区（任务板与清理产物，不进仓库）
+/.purge/

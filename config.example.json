@@ -1,0 +1,26 @@
+{
+  "_comment": "请复制为 config.json（或通过环境变量 LANCE_CONFIG 指定其他路径）。该文件只包含 database 和 skill_dir 两项。LLM 等其他配置放在环境变量或应用内设置中，不要写入此文件。",
+
+  "_comment_database": "PostgreSQL 连接。优先级：环境变量 LANCE_PG_DSN > 本文件中的 database。请选择以下两种填写方式之一：(A) 填写下面的各个字段，或 (B) 只在 database.dsn 中填写完整的连接字符串。",
+  "database": {
+    "host": "127.0.0.1",
+    "port": 5433,
+    "user": "lance",
+    "password": "",
+    "dbname": "lance",
+    "sslmode": "disable"
+  },
+
+  "_comment_database_dsn": "写法 (B): 删除上面的 database, 改为填写完整的 DSN。若 dsn 非空, 则忽略各单独字段。",
+  "_example_database_dsn": {
+    "database": {
+      "dsn": "postgres://user:pass@db.example.com:5432/lance?sslmode=require"
+    }
+  },
+
+  "_comment_skill_dir": "技能根目录（每个子目录为一个技能，并包含 SKILL.md）。优先级：环境变量 LANCE_SKILL_DIR > 此字段 > 默认值（与可执行文件同位置的 skills/）。留空或删除此字段时使用默认值。相对路径按当前工作目录解析。",
+  "skill_dir": "/opt/lance/skills",
+
+  "_comment_language": "用户可见的输出语言默认值（en·zh·es·ja 之一）。代理生成的报告、摘要、对话响应和后端消息都遵循此语言。优先级：环境变量 LANCE_LANG > 此字段 > 默认值(en)。运行时，设置界面中选择的值会覆盖此默认值。留空或删除此字段时使用默认值(en)。",
+  "language": "en"
+}

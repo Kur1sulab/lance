@@ -1,0 +1,236 @@
+#!/usr/bin/env bash
+# =============================================================================
+# LANCE 管理员密码重置脚本
+#
+# 登录用户名称固定为 LANCE。密码以 bcrypt 哈希形式存放在数据库 settings 表的
+# 保存在 auth.password_hash 键中。此脚本连接数据库后，使用 pgcrypto 在数据库内生成 bcrypt 哈希，
+#重新写入该键。与后端登录校验（golang.org/x/crypto/bcrypt）完全兼容。
+#
+# 两种部署方式：
+#   local (默认) -- 在宿主机上用 psql 直接连接数据库。连接信息按以下优先级获取：
+#                    命令行参数 > --dsn/$LANCE_PG_DSN > config.json 的 database.*
+#   docker        -- 通过 `docker compose exec`（或 `docker exec`）连接 postgres
+#                    在容器内执行 psql（compose 默认不向宿主机暴露 5432，因此在容器内执行）。
+#
+# 用法示例：
+#   ./reset-password.sh                          # 本地，自动读取 config.json/环境变量并交互式输入新密码
+#   ./reset-password.sh -p 'NewPass!'            # 本地，直接指定新密码
+#   ./reset-password.sh --dsn postgres://u:p@h:5432/lance
+#   ./reset-password.sh -H 127.0.0.1 -P 5433 -U autopentest -W pass -d lance
+#   ./reset-password.sh -m docker                # docker 部署（读取 .env 中的 POSTGRES_*）
+#   ./reset-password.sh -m docker -c pg容器名 --exec docker
+#
+# 安全：新密码通过环境变量 + psql \getenv 传递（不会进入进程 argv），用 :'var'
+# 会自动转义（防止 SQL 注入）。数据库密码通过 PGPASSWORD 传递，同样不会进入 argv。
+# =============================================================================
+set -euo pipefail
+
+PASS_KEY="auth.password_hash"
+BCRYPT_COST=10
+
+MODE=""            # local | docker（留空则自动判定）
+DSN=""
+HOST="" PORT="" USER="" DBPASS="" DBNAME="" SSLMODE=""
+CONFIG=""
+CONTAINER=""       # docker 模式下 postgres 服务/容器名（默认值 postgres）
+EXEC_KIND=""       # compose | docker（docker 模式下使用哪种 exec。留空则自动）
+NEWPASS=""
+ASSUME_YES=0
+
+die() { echo "错误： $*" >&2; exit 1; }
+info() { echo "· $*" >&2; }
+
+usage() { sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
+
+# ---- 参数解析 -------------------------------------------------------------
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -m|--mode)        MODE="${2:-}"; shift 2 ;;
+    --dsn)            DSN="${2:-}"; shift 2 ;;
+    -H|--host)        HOST="${2:-}"; shift 2 ;;
+    -P|--port)        PORT="${2:-}"; shift 2 ;;
+    -U|--user)        USER="${2:-}"; shift 2 ;;
+    -W|--db-password) DBPASS="${2:-}"; shift 2 ;;
+    -d|--dbname)      DBNAME="${2:-}"; shift 2 ;;
+    --sslmode)        SSLMODE="${2:-}"; shift 2 ;;
+    --config)         CONFIG="${2:-}"; shift 2 ;;
+    -c|--container)   CONTAINER="${2:-}"; shift 2 ;;
+    --exec)           EXEC_KIND="${2:-}"; shift 2 ;;
+    -p|--new-password) NEWPASS="${2:-}"; shift 2 ;;
+    -y|--yes)         ASSUME_YES=1; shift ;;
+    -h|--help)        usage ;;
+    *) die "未知参数：$1（使用 -h 查看用法）" ;;
+  esac
+done
+
+# ---- 从 config.json 读取 database.*（仅 local 模式且未显式指定连接信息时） -----
+# 优先用 python3 解析（更稳健）。没有 python3 时改用 grep（因为 config.json 是规整的分隔字段）。
+read_config_json() {
+  local path="$1"
+  [[ -f "$path" ]] || return 1
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$path" <<'PY'
+import json, sys
+try:
+    d = json.load(open(sys.argv[1])).get("database", {})
+except Exception:
+    sys.exit(1)
+# 可直接提供 dsn，也可分别提供各字段
+if d.get("dsn"):
+    print("DSN\t" + d["dsn"]); sys.exit(0)
+for k in ("host","port","user","password","dbname","sslmode"):
+    if d.get(k) is not None:
+        print(k.upper() + "\t" + str(d[k]))
+PY
+  else
+    # 非常简单的次要项：按键逐个 grep（值为字符串或数字）
+    local k
+    for k in host port user password dbname sslmode; do
+      local v
+      v=$(grep -oE "\"$k\"[[:space:]]*:[[:space:]]*(\"[^\"]*\"|[0-9]+)" "$path" 2>/dev/null \
+            | head -1 | sed -E "s/.*:[[:space:]]*//; s/^\"//; s/\"$//") || true
+      [[ -n "$v" ]] && echo -e "${k^^}\t$v"
+    done
+  fi
+}
+
+apply_config_fields() {
+  local line key val
+  while IFS=$'\t' read -r key val; do
+    [[ -z "$key" ]] && continue
+    case "$key" in
+      DSN)      [[ -z "$DSN" ]] && DSN="$val" ;;
+      HOST)     [[ -z "$HOST" ]] && HOST="$val" ;;
+      PORT)     [[ -z "$PORT" ]] && PORT="$val" ;;
+      USER)     [[ -z "$USER" ]] && USER="$val" ;;
+      PASSWORD) [[ -z "$DBPASS" ]] && DBPASS="$val" ;;
+      DBNAME)   [[ -z "$DBNAME" ]] && DBNAME="$val" ;;
+      SSLMODE)  [[ -z "$SSLMODE" ]] && SSLMODE="$val" ;;
+    esac
+  done
+}
+
+# ---- 模式自动判定 ---------------------------------------------------------
+if [[ -z "$MODE" ]]; then
+  if [[ -n "$DSN$HOST$USER$DBNAME" || -n "${LANCE_PG_DSN:-}" || -f "${CONFIG:-config.json}" ]]; then
+    MODE="local"
+  elif command -v docker >/dev/null 2>&1 && [[ -f docker-compose.yml ]]; then
+    MODE="docker"
+  else
+    MODE="local"
+  fi
+fi
+info "部署模式：$MODE"
+
+# ---- 收集新密码 -----------------------------------------------------------
+if [[ -z "$NEWPASS" ]]; then
+  read -r -s -p "输入新密码（用户名固定为 LANCE）：" NEWPASS; echo >&2
+  [[ -n "$NEWPASS" ]] || die "密码不能为空"
+  read -r -s -p "请再次输入以确认：" NEWPASS2; echo >&2
+  [[ "$NEWPASS" == "$NEWPASS2" ]] || die "两次输入的值不一致"
+fi
+[[ -n "$NEWPASS" ]] || die "密码不能为空"
+
+# 通过环境变量把密码传给 psql（用 \getenv 读取，不会进入 argv/ps）
+export LANCE_RESET_NEWPASS="$NEWPASS"
+
+# 在 DB 内生成 bcrypt 并 upsert。密码通过 :'newpw' 自动转义。CREATE EXTENSION 是幂等的，
+# 若数据库角色没有创建扩展的权限，此处会报错（提示见下方 run 的失败分支）。
+SQL=$(cat <<SQL
+\\set ON_ERROR_STOP on
+\\getenv newpw LANCE_RESET_NEWPASS
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+INSERT INTO settings(key, value)
+VALUES ('$PASS_KEY', crypt(:'newpw', gen_salt('bf', $BCRYPT_COST)))
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
+SQL
+)
+
+# ---- 执行 -----------------------------------------------------------------
+if [[ "$MODE" == "local" ]]; then
+  # 连接信息优先级：命令行 > --dsn/$LANCE_PG_DSN > config.json
+  if [[ -z "$DSN" && -z "$HOST$USER$DBNAME" ]]; then
+    [[ -n "${LANCE_PG_DSN:-}" ]] && DSN="$LANCE_PG_DSN"
+  fi
+  if [[ -z "$DSN" && -z "$HOST$USER$DBNAME" ]]; then
+    cfg="${CONFIG:-config.json}"
+    if [[ -f "$cfg" ]]; then
+      info "从 $cfg 读取数据库配置"
+      apply_config_fields < <(read_config_json "$cfg")
+    fi
+  fi
+
+  command -v psql >/dev/null 2>&1 || die "在此计算机上找不到 psql(请安装 postgresql-client 或使用 -m docker)"
+
+  declare -a PSQL_ARGS=()
+  if [[ -n "$DSN" ]]; then
+    PSQL_ARGS=("$DSN")
+    target="$DSN"
+  else
+    [[ -n "$USER"   ]] || die "缺少数据库用户(-U)，或没有有效的 config.json/DSN"
+    [[ -n "$DBNAME" ]] || die "缺少数据库名称(-d)，或没有有效的 config.json/DSN"
+    HOST="${HOST:-127.0.0.1}"; PORT="${PORT:-5432}"; SSLMODE="${SSLMODE:-disable}"
+    PSQL_ARGS=(-h "$HOST" -p "$PORT" -U "$USER" -d "$DBNAME")
+    [[ -n "$SSLMODE" ]] && export PGSSLMODE="$SSLMODE"
+    [[ -n "$DBPASS" ]] && export PGPASSWORD="$DBPASS"
+    target="$USER@$HOST:$PORT/$DBNAME"
+  fi
+
+  info "目标数据库: $target"
+  if [[ "$ASSUME_YES" -ne 1 ]]; then
+    read -r -p "要在此数据库中重置 LANCE 密码吗? [y/N]" ans
+    [[ "$ans" == "y" || "$ans" == "Y" ]] || die "已取消"
+  fi
+
+  if ! printf '%s\n' "$SQL" | psql "${PSQL_ARGS[@]}" -v ON_ERROR_STOP=1 -q >/dev/null; then
+    die "写入失败。如果出现 pgcrypto 权限不足或缺失错误，请使用具有扩展创建权限的角色，或先直接执行 CREATE EXTENSION pgcrypto。"
+  fi
+
+else
+  # ---- docker ----
+  command -v docker >/dev/null 2>&1 || die "找不到 docker"
+  CONTAINER="${CONTAINER:-postgres}"
+
+  # 选择 exec 方式：优先 docker compose exec（服务名），否则 docker exec（容器名）
+  if [[ -z "$EXEC_KIND" ]]; then
+    if docker compose version >/dev/null 2>&1 && [[ -f docker-compose.yml ]]; then
+      EXEC_KIND="compose"
+    else
+      EXEC_KIND="docker"
+    fi
+  fi
+
+  # 容器内 psql 凭据：优先命令行，其次 .env 的 POSTGRES_*，最后是 compose 默认值（lance）
+  if [[ -f .env ]]; then
+    # shellcheck disable=SC1091
+    set -a; . ./.env; set +a
+  fi
+  DUSER="${USER:-${POSTGRES_USER:-lance}}"
+  DNAME="${DBNAME:-${POSTGRES_DB:-lance}}"
+  [[ -n "$DBPASS" ]] && export PGPASSWORD="$DBPASS"
+  [[ -z "${PGPASSWORD:-}" && -n "${POSTGRES_PASSWORD:-}" ]] && export PGPASSWORD="$POSTGRES_PASSWORD"
+
+  info "目标: 容器 $CONTAINER 内的 psql -U $DUSER -d $DNAME(exec=$EXEC_KIND)"
+  if [[ "$ASSUME_YES" -ne 1 ]]; then
+    read -r -p "要在此容器数据库中重置 LANCE 密码吗? [y/N]" ans
+    [[ "$ans" == "y" || "$ans" == "Y" ]] || die "已取消"
+  fi
+
+  # -e 只给出名称不给值 → 从当前环境继承，因此密码不会出现在 docker 命令的 argv 中。
+  declare -a EXEC_CMD
+  if [[ "$EXEC_KIND" == "compose" ]]; then
+    EXEC_CMD=(docker compose exec -T -e LANCE_RESET_NEWPASS -e PGPASSWORD "$CONTAINER"
+              psql -U "$DUSER" -d "$DNAME" -v ON_ERROR_STOP=1 -q)
+  else
+    EXEC_CMD=(docker exec -i -e LANCE_RESET_NEWPASS -e PGPASSWORD "$CONTAINER"
+              psql -U "$DUSER" -d "$DNAME" -v ON_ERROR_STOP=1 -q)
+  fi
+
+  if ! printf '%s\n' "$SQL" | "${EXEC_CMD[@]}" >/dev/null; then
+    die "写入失败。请检查容器名(-c)、数据库账户(.env 中的 POSTGRES_*)、角色的 pgcrypto 权限。"
+  fi
+fi
+
+unset LANCE_RESET_NEWPASS
+echo "✓ 已重置 LANCE 管理员密码。请使用用户名 LANCE 和新密码登录（无需重启服务）。"
+echo "  已签发的登录会话(token)会在几秒内全部失效。若是在账号被抢占或泄露之后进行恢复，请同时检查自定义工具、MCP、LLM、通知设置。"
