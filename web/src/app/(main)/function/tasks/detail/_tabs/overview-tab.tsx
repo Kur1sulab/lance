@@ -475,7 +475,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
             <Button size="sm" variant="outline" disabled={goalBusy || !goalText.trim()} onClick={() => void addGoal()}>
               <PlusIcon className="size-3.5" /> {t("add")}
             </Button>
-            {goalErr && <span className="text-xs text-red-500">{goalErr}</span>}
+            {goalErr && <span className="text-xs text-red-700 dark:text-red-500">{goalErr}</span>}
           </div>
           {/* 目标列表 */}
           {goals.length > 0 ? (
@@ -512,7 +512,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                       disabled={goalBusy || !editText.trim()}
                       onClick={() => void saveEditGoal(g)}
                     >
-                      <CheckIcon className="size-3.5 text-emerald-500" />
+                      <CheckIcon className="size-3.5 text-emerald-700 dark:text-emerald-500" />
                     </Button>
                     <Button
                       size="sm"
@@ -549,7 +549,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                       disabled={goalBusy}
                       onClick={() => void removeGoal(g)}
                     >
-                      <Trash2Icon className="size-3.5 text-red-500" />
+                      <Trash2Icon className="size-3.5 text-red-700 dark:text-red-500" />
                     </Button>
                   </div>
                 ),
@@ -566,7 +566,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
-            <ShieldAlertIcon className="size-4 text-amber-500" /> {t("constraints.title")}
+            <ShieldAlertIcon className="size-4 text-amber-700 dark:text-amber-500" /> {t("constraints.title")}
             <span className="text-muted-foreground text-xs font-normal">
               {t("constraints.hint", { count: constraints.length })}
             </span>
@@ -601,7 +601,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
             >
               <PlusIcon className="size-3.5" /> {t("add")}
             </Button>
-            {conErr && <span className="text-xs text-red-500">{conErr}</span>}
+            {conErr && <span className="text-xs text-red-700 dark:text-red-500">{conErr}</span>}
           </div>
           {/* 约束列表 */}
           {constraints.length > 0 ? (
@@ -635,7 +635,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                       disabled={conBusy || !editConText.trim()}
                       onClick={() => void saveEditConstraint(c)}
                     >
-                      <CheckIcon className="size-3.5 text-emerald-500" />
+                      <CheckIcon className="size-3.5 text-emerald-700 dark:text-emerald-500" />
                     </Button>
                     <Button
                       size="sm"
@@ -675,7 +675,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                       disabled={conBusy}
                       onClick={() => void removeConstraint(c)}
                     >
-                      <Trash2Icon className="size-3.5 text-red-500" />
+                      <Trash2Icon className="size-3.5 text-red-700 dark:text-red-500" />
                     </Button>
                   </div>
                 ),
@@ -691,7 +691,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
-              <TargetIcon className="size-4 text-emerald-500" /> {t("coverage.title")}
+              <TargetIcon className="size-4 text-emerald-700 dark:text-emerald-500" /> {t("coverage.title")}
               <span className="text-muted-foreground text-xs font-normal">{t("coverage.rough")}</span>
             </CardTitle>
           </CardHeader>
@@ -724,7 +724,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
-            <CoinsIcon className="size-4 text-amber-500" /> {t("tokens.title")}
+            <CoinsIcon className="size-4 text-amber-700 dark:text-amber-500" /> {t("tokens.title")}
             <span className="text-muted-foreground text-xs font-normal">
               {t("tokens.hint", { calls: tokenTotals.calls })}
             </span>
@@ -749,7 +749,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                 </span>
                 <span className="tabular-nums">
                   <span className="text-muted-foreground">{t("tokens.cacheHitRate")} </span>
-                  <span className="font-semibold text-emerald-500">
+                  <span className="font-semibold text-emerald-700 dark:text-emerald-500">
                     {cacheHitRate(tokenTotals.cacheRead, tokenTotals.input)}
                   </span>
                 </span>
@@ -777,7 +777,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                         <td className="py-1.5 pr-3 text-right tabular-nums">{fmtTokens(m.input_tokens)}</td>
                         <td className="py-1.5 pr-3 text-right tabular-nums">{fmtTokens(m.output_tokens)}</td>
                         <td className="py-1.5 pr-3 text-right tabular-nums">{fmtTokens(m.cache_read_tokens)}</td>
-                        <td className="py-1.5 text-right tabular-nums text-emerald-500">
+                        <td className="py-1.5 text-right tabular-nums text-emerald-700 dark:text-emerald-500">
                           {cacheHitRate(m.cache_read_tokens, m.input_tokens)}
                         </td>
                       </tr>
@@ -795,7 +795,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
-            <ShieldCheckIcon className="size-4 text-emerald-500" /> {t("scope.title")}
+            <ShieldCheckIcon className="size-4 text-emerald-700 dark:text-emerald-500" /> {t("scope.title")}
             <span className="text-muted-foreground text-xs font-normal">
               {t("scope.hint", { count: scope.length })}
             </span>
@@ -845,7 +845,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
             >
               <PlusIcon className="size-3.5" /> {t("add")}
             </Button>
-            {scopeErr && <span className="text-xs text-red-500">{scopeErr}</span>}
+            {scopeErr && <span className="text-xs text-red-700 dark:text-red-500">{scopeErr}</span>}
           </div>
           {/* 范围列表 */}
           {scope.length > 0 ? (
@@ -866,7 +866,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                       className="h-6 shrink-0 px-1.5"
                       onClick={() => void removeScope(row)}
                     >
-                      <Trash2Icon className="size-3.5 text-red-500" />
+                      <Trash2Icon className="size-3.5 text-red-700 dark:text-red-500" />
                     </Button>
                   ) : (
                     <span className="text-muted-foreground shrink-0 text-xs">{t("scope.inherited")}</span>
@@ -883,7 +883,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
-            <ActivityIcon className="size-4 text-blue-500" /> {t("heartbeat.title")}
+            <ActivityIcon className="size-4 text-blue-700 dark:text-blue-500" /> {t("heartbeat.title")}
           </CardTitle>
         </CardHeader>
         <CardContent className="grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -947,7 +947,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-sm">
-              <AlertTriangleIcon className="size-4 text-amber-500" /> {t("attention.title")}
+              <AlertTriangleIcon className="size-4 text-amber-700 dark:text-amber-500" /> {t("attention.title")}
             </CardTitle>
           </CardHeader>
           <CardContent className="grid grid-cols-2 gap-3 text-sm">
@@ -973,7 +973,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-sm">
-              <BugIcon className="size-4 text-red-500" /> {t("recent.title")}
+              <BugIcon className="size-4 text-red-700 dark:text-red-500" /> {t("recent.title")}
             </CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-2">
@@ -994,7 +994,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
         <Card className="border-red-500/30">
           <CardHeader className="flex-row items-center justify-between gap-2 space-y-0">
             <CardTitle className="flex items-center gap-2 text-sm">
-              <AlertTriangleIcon className="size-4 text-red-500" /> {t("blocked.title")}
+              <AlertTriangleIcon className="size-4 text-red-700 dark:text-red-500" /> {t("blocked.title")}
               <span className="text-xs font-normal text-muted-foreground">
                 {t("blocked.hint", { count: blocked.length })}
               </span>
@@ -1153,7 +1153,7 @@ function TaskInterceptRulesCard({ taskId }: { taskId: string }) {
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
-          <ShieldCheckIcon className="size-4 text-sky-500" /> {t("rule.title")}
+          <ShieldCheckIcon className="size-4 text-sky-700 dark:text-sky-500" /> {t("rule.title")}
           <span className="text-muted-foreground text-xs font-normal">{t("rule.hint", { count: rules.length })}</span>
         </CardTitle>
       </CardHeader>
@@ -1191,7 +1191,7 @@ function TaskInterceptRulesCard({ taskId }: { taskId: string }) {
           <Button size="sm" variant="outline" disabled={busy || !newPattern.trim()} onClick={() => void add()}>
             <PlusIcon className="size-3.5" /> {t("add")}
           </Button>
-          {err && <span className="text-xs text-red-500">{err}</span>}
+          {err && <span className="text-xs text-red-700 dark:text-red-500">{err}</span>}
         </div>
         {/* 规则列表 */}
         {rules.length > 0 ? (
@@ -1243,7 +1243,7 @@ function TaskInterceptRulesCard({ taskId }: { taskId: string }) {
                     disabled={busy || !editPattern.trim()}
                     onClick={() => void saveEdit(r)}
                   >
-                    <CheckIcon className="size-3.5 text-emerald-500" />
+                    <CheckIcon className="size-3.5 text-emerald-700 dark:text-emerald-500" />
                   </Button>
                   <Button
                     size="sm"
@@ -1288,7 +1288,7 @@ function TaskInterceptRulesCard({ taskId }: { taskId: string }) {
                     disabled={busy}
                     onClick={() => void remove(r)}
                   >
-                    <Trash2Icon className="size-3.5 text-red-500" />
+                    <Trash2Icon className="size-3.5 text-red-700 dark:text-red-500" />
                   </Button>
                 </div>
               ),

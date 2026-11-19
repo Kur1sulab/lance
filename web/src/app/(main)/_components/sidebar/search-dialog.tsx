@@ -18,7 +18,7 @@ import {
   CommandList,
   CommandSeparator,
 } from "@/components/ui/command";
-import type { NavMainItem } from "@/navigation/sidebar/sidebar-items";
+import type { NavGroup, NavMainItem } from "@/navigation/sidebar/sidebar-items";
 import { sidebarItems } from "@/navigation/sidebar/sidebar-items";
 
 // 显示字符串不放入数据，只保存 nav 命名空间的键。实际的标签与标题由
@@ -34,15 +34,13 @@ type SearchItem = {
   newTab?: boolean;
 };
 
-//组编号 → nav.group.* 键。使用与 nav-main 相同的映射。
-const GROUP_MESSAGE_KEY: Record<number, string> = { 1: "function", 2: "system" };
-function groupHeadingKey(groupId: number): string {
-  const k = GROUP_MESSAGE_KEY[groupId];
-  return k ? `group.${k}` : `group.${groupId}`;
+// 域标题键与 nav-main 同源：直接用 sidebar-items.ts 的 messageKey，避免两处映射各写一套而漂移。
+function groupHeadingKey(group: NavGroup): string {
+  return group.messageKey ? `group.${group.messageKey}` : `group.${group.id}`;
 }
 
 const searchItems: SearchItem[] = sidebarItems.flatMap((group) => {
-  const headingKey = groupHeadingKey(group.id);
+  const headingKey = groupHeadingKey(group);
   return group.items.flatMap((item) => {
     if (item.subItems) {
       return item.subItems.map((sub) => ({

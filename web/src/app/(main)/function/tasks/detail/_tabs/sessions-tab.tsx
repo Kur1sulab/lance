@@ -168,19 +168,19 @@ function mergeBySeq(current: Activity[], incoming: Activity[]): Activity[] {
 function statusIcon(status: SessionStatus) {
   switch (status) {
     case "running": // 执行中
-      return <Loader2Icon className="size-3.5 animate-spin text-blue-500" />;
+      return <Loader2Icon className="size-3.5 animate-spin text-blue-700 dark:text-blue-500" />;
     case "paused":
-      return <PauseIcon className="size-3.5 text-amber-500" />;
+      return <PauseIcon className="size-3.5 text-amber-700 dark:text-amber-500" />;
     case "pending": // 待领取(open intent)
       return <ClockIcon className="size-3.5 text-muted-foreground" />;
     case "done": // 完成
-      return <CircleCheckIcon className="size-3.5 text-emerald-500" />;
+      return <CircleCheckIcon className="size-3.5 text-emerald-700 dark:text-emerald-500" />;
     case "stopped": // 取消/停止(被 planner 终止)
-      return <CircleSlashIcon className="size-3.5 text-amber-500" />;
+      return <CircleSlashIcon className="size-3.5 text-amber-700 dark:text-amber-500" />;
     case "blocked": // 出错
-      return <CircleXIcon className="size-3.5 text-red-500" />;
+      return <CircleXIcon className="size-3.5 text-red-700 dark:text-red-500" />;
     case "exhausted": // 步数耗尽(撞 max_turns)
-      return <ZapOffIcon className="size-3.5 text-violet-500" />;
+      return <ZapOffIcon className="size-3.5 text-violet-700 dark:text-violet-500" />;
     case "deleted": // 用户假删除
       return <CircleSlashIcon className="size-3.5 text-muted-foreground" />;
   }
@@ -371,7 +371,7 @@ function SessionItem({
   ) : s.role === "worker" ? (
     statusIcon(s.status)
   ) : s.live ? (
-    <Loader2Icon className="size-3.5 animate-spin text-blue-500" />
+    <Loader2Icon className="size-3.5 animate-spin text-blue-700 dark:text-blue-500" />
   ) : null;
 
   const cancellable =
@@ -413,7 +413,7 @@ function SessionItem({
             {t("item.deleted")}
           </Badge>
         )}
-        {hasPending && <ShieldAlertIcon className="size-3.5 shrink-0 text-amber-500" />}
+        {hasPending && <ShieldAlertIcon className="size-3.5 shrink-0 text-amber-700 dark:text-amber-500" />}
         {!active && unread ? (
           <span className="inline-flex min-w-4 items-center justify-center rounded-full bg-blue-500/15 px-1 text-[10px] font-medium tabular-nums text-blue-600 dark:text-blue-400">
             {unread > 99 ? "99+" : unread}
@@ -1663,7 +1663,7 @@ export function SessionsTab({ taskId }: { taskId: string }) {
                 <span
                   className={cn(
                     "inline-flex items-center gap-1 text-[10px]",
-                    sseLive ? "text-emerald-500" : "text-amber-500",
+                    sseLive ? "text-emerald-700 dark:text-emerald-500" : "text-amber-700 dark:text-amber-500",
                   )}
                   title={sseLive ? t("sse.titleLive") : t("sse.titleDown")}
                 >
@@ -1950,7 +1950,7 @@ export function SessionsTab({ taskId }: { taskId: string }) {
                     {t("transcript.loadingActivity")}
                   </div>
                 ) : activeState?.error ? (
-                  <div className="flex items-center gap-2 pl-9 text-xs text-red-500">
+                  <div className="flex items-center gap-2 pl-9 text-xs text-red-700 dark:text-red-500">
                     <CircleXIcon className="size-3.5" />
                     {t("transcript.loadError", { error: activeState.error })}
                     <Button

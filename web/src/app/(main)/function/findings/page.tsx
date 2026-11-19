@@ -755,10 +755,10 @@ export default function FindingsPage() {
 
   const statCards = [
     { label: t("stat.total"), value: stats.total, icon: BugIcon },
-    { label: t("stat.pending"), value: stats.pending, tone: "text-amber-500", icon: ClockIcon },
+    { label: t("stat.pending"), value: stats.pending, tone: "text-amber-700 dark:text-amber-500", icon: ClockIcon },
     { label: t("severity.critical"), value: stats.critical, tone: "text-rose-600", icon: ShieldAlertIcon },
-    { label: t("severity.high"), value: stats.high, tone: "text-red-500", icon: TriangleAlertIcon },
-    { label: t("severity.medium"), value: stats.medium, tone: "text-amber-500", icon: TriangleAlertIcon },
+    { label: t("severity.high"), value: stats.high, tone: "text-red-700 dark:text-red-500", icon: TriangleAlertIcon },
+    { label: t("severity.medium"), value: stats.medium, tone: "text-amber-700 dark:text-amber-500", icon: TriangleAlertIcon },
     { label: t("severity.low"), value: stats.low, tone: "text-slate-500", icon: InfoIcon },
   ];
 

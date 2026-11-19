@@ -92,7 +92,7 @@ export default function LoginPage() {
     <div className="flex h-dvh">
       {/* Left panel */}
       <div className="relative hidden flex-col items-center justify-center bg-neutral-950 p-12 text-center lg:flex lg:w-1/3">
-        <div className="absolute inset-x-0 top-8 flex items-center justify-between px-8 font-mono text-[10px] uppercase tracking-[0.18em] text-white/55">
+        <div className="absolute inset-x-0 top-8 flex items-center justify-between px-8 font-mono text-[10px] uppercase tracking-[0.18em] text-white/70">
           <span>LANCE // SYSTEM</span><span>UNIT-01</span>
         </div>
         <div className="relative flex items-center justify-center">
@@ -102,7 +102,7 @@ export default function LoginPage() {
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/logo.png" alt="Lance" width={160} height={160} className="relative brightness-0 invert" />
         </div>
-        <div className="absolute inset-x-0 bottom-8 flex items-center justify-between px-8 font-mono text-[10px] uppercase tracking-[0.18em] text-white/45">
+        <div className="absolute inset-x-0 bottom-8 flex items-center justify-between px-8 font-mono text-[10px] uppercase tracking-[0.18em] text-white/60">
           <span>AUTONOMOUS PENTEST CONSOLE</span><span>v2.0.0</span>
         </div>
       </div>

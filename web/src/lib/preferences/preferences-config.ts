@@ -64,9 +64,10 @@ type PreferencePersistenceConfig = {
 
 /**
  * Default preference values on first load.
+ * theme_mode 默认浅色：产品线统一以纸白/浅色为默认外观，深色由用户在侧栏自行切换。
  */
 export const PREFERENCE_DEFAULTS: PreferenceValueMap = {
-  theme_mode: "dark",
+  theme_mode: "light",
   theme_preset: "lance",
   font: "geist",
   content_layout: "full-width",

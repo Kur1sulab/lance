@@ -146,7 +146,14 @@
     "trafficStatusCodes": "Códigos de estado del tráfico",
     "verNew": "Nueva",
     "verOld": "Antigua",
-    "viewTasks": "Ver tareas"
+    "viewTasks": "Ver tareas",
+    "activityKind": {
+      "tool_use": "Llamada a herramienta",
+      "tool_result": "Resultado de herramienta",
+      "text": "Texto",
+      "thinking": "Razonamiento",
+      "result": "Resultado"
+    }
   },
   "header": {
     "updateBadge": "Nueva versión {latest}",
@@ -156,8 +163,11 @@
   },
   "nav": {
     "group": {
-      "function": "Funciones",
-      "system": "Sistema"
+      "war": "Operaciones",
+      "target": "Objetivos",
+      "capability": "Capacidades",
+      "observe": "Observabilidad",
+      "govern": "Gobernanza"
     },
     "item": {
       "agents": "Agentes",
@@ -165,7 +175,7 @@
       "asset-intercept": "Bloqueo de activos",
       "assets": "Activos",
       "chat": "Chat",
-      "commands": "Ejecución de herramientas",
+      "commands": "Registro de llamadas a herramientas",
       "dashboard": "Panel",
       "findings": "Hallazgos",
       "intercept": "Reglas de intercepción",
@@ -2991,7 +3001,9 @@
       "mainagent": "Agente principal",
       "planner": "Planificador",
       "worker": "Workers",
-      "system": "Auditoría del sistema"
+      "system": "Auditoría del sistema",
+      "chat": "Chat",
+      "goal_decomp": "Descomposición de objetivos"
     },
     "title": {
       "main": "Agente principal · sesión #{n}",

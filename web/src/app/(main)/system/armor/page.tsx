@@ -28,6 +28,7 @@ import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { auth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
+import { useTranslations } from "next-intl";
 
 type ArmorProfile = {
   id: string;
@@ -98,6 +99,7 @@ function StatCell({ label, value, hint }: { label: string; value: React.ReactNod
 }
 
 export default function ArmorPage() {
+  const tRole = useTranslations("sessions.role");
   const [state, setState] = React.useState<ArmorState | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState<string | null>(null);
@@ -181,23 +183,28 @@ export default function ArmorPage() {
 
   const active = state.profiles.find((p) => p.id === state.mode);
   const roles = Object.entries(state.stats.roles ?? {}).sort((a, b) => b[1] - a[1]);
+  const modeName = (id: string) => state.profiles.find((p) => p.id === id)?.name ?? id;
 
   return (
-    <div className="flex flex-col gap-4 p-4">
+    <div className="flex flex-col gap-4 p-4 md:gap-6 md:p-6">
+      <div>
+        <h1 className="text-xl font-semibold tracking-tight">破甲引擎</h1>
+        <p className="text-sm text-muted-foreground">系统提示注入档位 · 切换后下一轮 agent 即生效</p>
+      </div>
       {/* 顶部：当前档位 + 运行情况 */}
       <Card className="p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
-              <FlameIcon className="size-4 text-orange-500" />
-              <span className="text-sm font-medium">破甲引擎</span>
+              <FlameIcon className="size-4 text-foreground" />
+              <span className="text-sm font-medium">当前档位</span>
               <Badge variant={state.stats.active ? "default" : "secondary"}>
                 {state.stats.active ? `运行中 · ${active?.name ?? state.mode}` : "已关闭"}
               </Badge>
             </div>
             <div className="mt-1 max-w-2xl text-xs text-muted-foreground">
-              在 planner / worker / 主 agent / 对话 / 目标分解五个角色的系统提示尾部，追加一段由代码拥有的操作者授权规约。
-              正文存库、可被编辑，尾部由代码拥有——改正文永远改不掉它。
+              给五个角色（规划 / 执行 / 主控 / 对话 / 目标分解）的系统提示末尾追加一段操作者授权规约，
+              让模型把操作者指令放在第一位、直接给出可执行内容。规约正文可编辑，末尾的强制段由代码固化，改正文不会把它改掉。
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -217,7 +224,7 @@ export default function ArmorPage() {
           <StatCell
             label="最近注入"
             value={<span className="text-sm">{state.stats.last_inject ? state.stats.last_inject.replace("T", " ").slice(0, 19) : "—"}</span>}
-            hint={state.stats.last_mode ? `上次生效档位 ${state.stats.last_mode}` : "尚未注入过"}
+            hint={state.stats.last_mode ? `上次生效档位 ${modeName(state.stats.last_mode)}` : "尚未注入过"}
           />
         </div>
 
@@ -229,8 +236,8 @@ export default function ArmorPage() {
                 <ActivityIcon className="size-3.5" /> 按角色分桶
               </span>
               {roles.map(([role, n]) => (
-                <Badge key={role} variant="outline" className="font-mono text-[11px]">
-                  {role} · {n}
+                <Badge key={role} variant="outline" className="text-[11px]">
+                  {tRole.has(role) ? tRole(role) : role} · {n}
                 </Badge>
               ))}
             </div>
@@ -247,13 +254,13 @@ export default function ArmorPage() {
               key={p.id}
               className={cn(
                 "flex cursor-pointer flex-col gap-2 p-4 transition-colors",
-                isActive ? "border-orange-500/60 ring-1 ring-orange-500/30" : "hover:border-foreground/20",
+                isActive ? "border-ring/60 ring-1 ring-ring/30" : "hover:border-foreground/20",
               )}
               onClick={() => void pickMode(p.id)}
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <ModeIcon id={p.id} className={cn("size-4", isActive ? "text-orange-500" : "text-muted-foreground")} />
+                  <ModeIcon id={p.id} className={cn("size-4", isActive ? "text-foreground" : "text-muted-foreground")} />
                   <span className="text-sm font-medium">{p.name}</span>
                 </div>
                 {isActive ? (
@@ -270,7 +277,7 @@ export default function ArmorPage() {
                   {[0, 1, 2, 3].map((i) => (
                     <span
                       key={i}
-                      className={cn("h-1.5 w-4 rounded-full", i < p.strength ? "bg-orange-500" : "bg-muted")}
+                      className={cn("h-1.5 w-4 rounded-full", i < p.strength ? "bg-foreground" : "bg-muted")}
                     />
                   ))}
                 </div>
@@ -299,7 +306,7 @@ export default function ArmorPage() {
         <Card className="p-4">
           <div className="mb-2 flex items-center justify-between">
             <div className="text-sm font-medium">
-              规约正文 · <span className="font-mono text-xs text-muted-foreground">{preview.mode}</span>
+              规约正文 · <span className="text-xs text-muted-foreground">{modeName(preview.mode)}</span>
             </div>
             <Button variant="ghost" size="sm" className="h-6 px-2 text-[11px]" onClick={() => setPreview(null)}>
               收起
@@ -333,8 +340,8 @@ export default function ArmorPage() {
         {probe ? (
           <div className="mt-3 space-y-2">
             <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-              <Badge variant="outline" className="font-mono">
-                mode={probe.mode}
+              <Badge variant="outline">
+                档位 · {modeName(probe.mode)}
               </Badge>
               <span>系统提示 {probe.system_len} 字</span>
               <span>其中破甲尾部 {probe.armor_len} 字</span>

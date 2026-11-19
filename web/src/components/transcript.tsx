@@ -267,7 +267,7 @@ function InterceptCard({ step, getDetail }: { step: Activity; getDetail: (seq: n
     <div className="my-2 rounded-lg border border-amber-400/50 bg-amber-50/40 dark:bg-amber-950/15 p-3 text-xs">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex items-start gap-2 min-w-0">
-          <ShieldAlertIcon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" />
+          <ShieldAlertIcon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-700 dark:text-amber-500" />
           <div className="min-w-0 space-y-0.5">
             <div className="flex items-center gap-1.5 font-medium">
               <span className="text-amber-700 dark:text-amber-400">{t("approval.request")}</span>

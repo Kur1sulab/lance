@@ -182,7 +182,7 @@ function PoolSheet({
                         </span>
                         <span className="font-medium">{m.name}</span>
                         {m.active && (
-                          <Badge variant="outline" className="border-amber-400/50 text-amber-500">
+                          <Badge variant="outline" className="border-amber-400/50 text-amber-700 dark:text-amber-500">
                             {t("pool.badge.active")}
                           </Badge>
                         )}
@@ -435,7 +435,7 @@ function ProfileSheet({
           <SheetTitle className="flex items-center gap-2">
             {isNew ? t("profile.titleNew") : t("profile.titleEdit", { name: profile?.name ?? "" })}
             {profile?.is_default && (
-              <Badge variant="outline" className="border-amber-400/50 text-amber-500">
+              <Badge variant="outline" className="border-amber-400/50 text-amber-700 dark:text-amber-500">
                 {t("profile.activeBadge")}
               </Badge>
             )}
@@ -877,7 +877,7 @@ export default function LLMPage() {
                       <StarIcon
                         className={cn(
                           "mt-0.5 size-4 shrink-0",
-                          p.is_default ? "fill-amber-400 text-amber-400" : "text-muted-foreground",
+                          p.is_default ? "fill-amber-400 text-amber-700 dark:text-amber-400" : "text-muted-foreground",
                         )}
                       />
                       <div className="min-w-0 flex-1">

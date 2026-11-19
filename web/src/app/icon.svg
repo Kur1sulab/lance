@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" role="img" aria-label="lance">
+  <rect x="0.5" y="0.5" width="23" height="23" rx="5" fill="#101828"/>
+  <g transform="translate(4.080 4.080) scale(0.660)">
+    <path d="M 18.467 10.145307692307693 L 18.467 14.679 L 14.679 18.467 L 10.145307692307693 18.467" stroke="#F2F4F7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <path d="M 5.533 13.854692307692307 L 5.533 9.321 L 9.321 5.533 L 13.854692307692307 5.533" stroke="#F2F4F7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <path d="M 3.5 20.5 L 17.340 6.660" stroke="#F2F4F7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <path d="M 21.3 2.7 L 19.532233047033632 8.286143571373726 L 15.713856428626276 4.467766952966369 Z" fill="#F2F4F7" stroke="none"/>
+  </g>
+</svg>

@@ -74,10 +74,10 @@ const ASSET_COLORS: Record<string, string> = {
 };
 
 function statusColor(code: number): string {
-  if (code < 300) return "text-emerald-500";
-  if (code < 400) return "text-blue-400";
-  if (code < 500) return "text-amber-400";
-  return "text-red-400";
+  if (code < 300) return "text-emerald-700 dark:text-emerald-500";
+  if (code < 400) return "text-blue-700 dark:text-blue-400";
+  if (code < 500) return "text-amber-700 dark:text-amber-400";
+  return "text-red-700 dark:text-red-400";
 }
 
 function statusBg(code: number): string {
@@ -118,6 +118,8 @@ function SectionTitle({
 export default function DashboardPage() {
   const t = useTranslations("dashboard");
   const tStatus = useTranslations("status");
+  const tKind = useTranslations("dashboard.activityKind");
+  const tRole = useTranslations("sessions.role");
   const rel = (ts?: string | number) => {
     const v = fmtRel(ts);
     return v === null ? "—" : t("ago", { value: v });
@@ -474,33 +476,30 @@ export default function DashboardPage() {
 
   // activity kind label
   function kindLabel(a: Activity): string {
-    if (a.kind === "tool_use") return a.tool ?? "tool_use";
-    if (a.kind === "tool_result") return "tool_result";
-    return a.kind;
+    if (a.kind === "tool_use") return a.tool ?? tKind("tool_use");
+    return tKind.has(a.kind) ? tKind(a.kind) : a.kind;
   }
 
   function workerColor(w: string): string {
-    if (w === "planner") return "text-violet-400";
+    if (w === "planner") return "text-violet-700 dark:text-violet-400";
     if (w === "mainagent") return "text-cyan-400";
-    return "text-blue-400";
+    return "text-blue-700 dark:text-blue-400";
   }
 
   function workerBg(w: string): string {
-    if (w === "planner") return "bg-violet-500/10 text-violet-400 border-violet-500/20";
+    if (w === "planner") return "bg-violet-500/10 text-violet-700 dark:text-violet-400 border-violet-500/20";
     if (w === "mainagent") return "bg-cyan-500/10 text-cyan-400 border-cyan-500/20";
-    return "bg-blue-500/10 text-blue-400 border-blue-500/20";
+    return "bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/20";
   }
 
   // ── render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex flex-1 flex-col gap-4 pb-6">
+    <div className="flex flex-1 flex-col gap-4 pb-6 md:gap-6">
       {/* ── Header ── */}
       <div>
-        <div>
-          <h1 className="text-lg font-semibold tracking-tight">{t("title")}</h1>
-          <p className="text-xs text-muted-foreground">{t("subtitle")}</p>
-        </div>
+        <h1 className="text-xl font-semibold tracking-tight">{t("title")}</h1>
+        <p className="text-sm text-muted-foreground">{t("subtitle")}</p>
       </div>
 
       {/* ── Row 1: 5 stat cards ── */}
@@ -518,17 +517,17 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent className="flex flex-wrap gap-x-2.5 gap-y-0.5 text-[10px]">
             {(tasksByStatus.running ?? 0) > 0 && (
-              <span className="text-blue-400">
+              <span className="text-blue-700 dark:text-blue-400">
                 {t("statExplore")} {tasksByStatus.running}
               </span>
             )}
             {(tasksByStatus.paused ?? 0) > 0 && (
-              <span className="text-amber-400">
+              <span className="text-amber-700 dark:text-amber-400">
                 {t("statPaused")} {tasksByStatus.paused}
               </span>
             )}
             {(tasksByStatus.done ?? 0) > 0 && (
-              <span className="text-emerald-400">
+              <span className="text-emerald-700 dark:text-emerald-400">
                 {t("statDone")} {tasksByStatus.done}
               </span>
             )}
@@ -545,13 +544,13 @@ export default function DashboardPage() {
             <div className="text-2xl font-semibold tabular-nums">{findings.length}</div>
           </CardHeader>
           <CardContent className="flex flex-wrap gap-2.5 text-[10px]">
-            <span className="text-rose-500">
+            <span className="text-rose-700 dark:text-rose-500">
               {tStatus("severity.critical")} {findingsBySev.critical}
             </span>
-            <span className="text-red-400">
+            <span className="text-red-700 dark:text-red-400">
               {tStatus("severity.high")} {findingsBySev.high}
             </span>
-            <span className="text-amber-400">
+            <span className="text-amber-700 dark:text-amber-400">
               {tStatus("severity.medium")} {findingsBySev.medium}
             </span>
             <span className="text-slate-400">
@@ -632,7 +631,7 @@ export default function DashboardPage() {
                   onClick={() => setTokenVersion(v)}
                   title={v === "new" ? t("tooltipNew") : t("tooltipOld")}
                   className={cn(
-                    "rounded px-2 py-0.5 text-[9px] font-medium transition-colors",
+                    "rounded px-2 py-0.5 text-[10px] font-medium transition-colors",
                     tokenVersion === v
                       ? "bg-background text-foreground shadow-sm"
                       : "text-muted-foreground hover:text-foreground",
@@ -674,17 +673,19 @@ export default function DashboardPage() {
                     tokenTab === resolvedKey
                       ? "bg-foreground text-background"
                       : "bg-muted/30 text-muted-foreground hover:text-foreground",
-                    !hasData && "opacity-40",
+                    // 无数据时用「描边」而不是「压透明度」：opacity-40 会把文字对比度压到 1.9:1，
+                    // 既违反 WCAG 又让人看不清这个 profile 叫什么。
+                    !hasData && "bg-transparent text-muted-foreground ring-1 ring-inset ring-border/60",
                   )}
                 >
                   {p.name}
                   {p.is_default && (
                     <span
                       className={cn(
-                        "rounded px-1 py-0 text-[8px]",
+                        "rounded px-1 py-0 text-[10px]",
                         tokenTab === resolvedKey
                           ? "bg-background/20 text-background"
-                          : "bg-emerald-500/20 text-emerald-400",
+                          : "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
                       )}
                     >
                       {t("default")}
@@ -721,19 +722,19 @@ export default function DashboardPage() {
                     label: t("inputUncached"),
                     value: displayedTokens.input - displayedTokens.cacheRead,
                     barColor: dailyTrendConfig.input.color!,
-                    text: "text-blue-400",
+                    text: "text-blue-700 dark:text-blue-400",
                   },
                   {
                     label: t("cacheHit"),
                     value: displayedTokens.cacheRead,
                     barColor: dailyTrendConfig.cacheRead.color!,
-                    text: "text-emerald-400",
+                    text: "text-emerald-700 dark:text-emerald-400",
                   },
                   {
                     label: t("output"),
                     value: displayedTokens.output,
                     barColor: dailyTrendConfig.output.color!,
-                    text: "text-violet-400",
+                    text: "text-violet-700 dark:text-violet-400",
                   },
                 ].map(({ label, value, barColor, text }) => {
                   const pct = total > 0 ? (value / total) * 100 : 0;
@@ -764,7 +765,7 @@ export default function DashboardPage() {
                 <div className="flex items-center justify-between rounded-lg border bg-muted/20 px-3 py-2 text-[10px]">
                   <span className="text-muted-foreground">{t("cacheHitRate")}</span>
                   <span
-                    className={cn("font-semibold tabular-nums", hitPct > 50 ? "text-emerald-400" : "text-amber-400")}
+                    className={cn("font-semibold tabular-nums", hitPct > 50 ? "text-emerald-700 dark:text-emerald-400" : "text-amber-700 dark:text-amber-400")}
                   >
                     {hitPct}%
                   </span>
@@ -776,7 +777,7 @@ export default function DashboardPage() {
           {/* Right: daily bar chart */}
           <div className="flex min-h-0 flex-col">
             <div className="mb-2 flex items-center justify-between">
-              <div className="flex gap-3 text-[9px] text-muted-foreground">
+              <div className="flex gap-3 text-[10px] text-muted-foreground">
                 {(["input", "output", "cacheRead"] as const).map((k) => (
                   <span key={k} className="flex items-center gap-1">
                     <span
@@ -802,7 +803,7 @@ export default function DashboardPage() {
                     key={days}
                     onClick={() => setTokenDays(days)}
                     className={cn(
-                      "rounded px-2.5 py-0.5 text-[9px] font-medium transition-colors",
+                      "rounded px-2.5 py-0.5 text-[10px] font-medium transition-colors",
                       tokenDays === days
                         ? "bg-background text-foreground shadow-sm"
                         : "text-muted-foreground hover:text-foreground",
@@ -894,8 +895,8 @@ export default function DashboardPage() {
               const count = activity.filter((a) => a.kind === kind).length;
               if (count === 0) return null;
               return (
-                <span key={kind} className="rounded border bg-muted/20 px-1.5 py-0.5 text-[9px] text-muted-foreground">
-                  {kind} <strong className="text-foreground/70">{count}</strong>
+                <span key={kind} className="rounded border bg-muted/20 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                  {tKind.has(kind) ? tKind(kind) : kind} <strong className="text-foreground">{count}</strong>
                 </span>
               );
             })}
@@ -909,21 +910,21 @@ export default function DashboardPage() {
                 <div key={a.seq} className="flex gap-2.5 py-2">
                   <span
                     className={cn(
-                      "shrink-0 self-start rounded border px-1.5 py-0.5 font-mono text-[9px]",
+                      "shrink-0 self-start rounded border px-1.5 py-0.5 font-mono text-[10px]",
                       workerBg(a.worker),
                     )}
                   >
-                    {a.worker}
+                    {tRole.has(a.worker) ? tRole(a.worker) : a.worker}
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="text-[11px] font-medium">{kindLabel(a)}</div>
                     <div className="mt-0.5 truncate text-[10px] text-muted-foreground">{a.summary}</div>
                   </div>
                   <div className="shrink-0 text-right">
-                    <Badge variant="outline" className="px-1.5 py-0 text-[9px] text-muted-foreground">
-                      {a.kind}
+                    <Badge variant="outline" className="px-1.5 py-0 text-[10px] text-muted-foreground">
+                      {tKind.has(a.kind) ? tKind(a.kind) : a.kind}
                     </Badge>
-                    <div className="mt-0.5 text-[9px] tabular-nums text-muted-foreground">{rel(a.ts)}</div>
+                    <div className="mt-0.5 text-[10px] tabular-nums text-muted-foreground">{rel(a.ts)}</div>
                   </div>
                 </div>
               ))
@@ -968,7 +969,7 @@ export default function DashboardPage() {
                       {f.summary}
                     </div>
                   </div>
-                  <span className="shrink-0 text-[9px] tabular-nums text-muted-foreground">{rel(f.ts)}</span>
+                  <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">{rel(f.ts)}</span>
                 </div>
               ))
             )}
@@ -1006,7 +1007,7 @@ export default function DashboardPage() {
               ].map((h) => (
                 <th
                   key={h}
-                  className="px-4 py-2 text-left text-[9px] font-semibold uppercase tracking-widest text-muted-foreground first:pl-4"
+                  className="px-4 py-2 text-left text-[10px] font-semibold uppercase tracking-widest text-muted-foreground first:pl-4"
                 >
                   {h}
                 </th>
@@ -1119,12 +1120,12 @@ export default function DashboardPage() {
               <div className="mb-3 flex items-end gap-2" style={{ height: 52 }}>
                 {trafficByCodes.map(({ code, n }) => (
                   <div key={code} className="flex flex-1 flex-col items-center gap-1">
-                    <span className="text-[9px] tabular-nums text-muted-foreground">{n}</span>
+                    <span className="text-[10px] tabular-nums text-muted-foreground">{n}</span>
                     <div
                       className={cn("w-full min-h-1 rounded-sm", statusBg(code), "opacity-80")}
                       style={{ height: Math.max(4, (n / trafficMax) * 36) }}
                     />
-                    <span className={cn("text-[9px] font-mono", statusColor(code))}>{code}</span>
+                    <span className={cn("text-[10px] font-mono", statusColor(code))}>{code}</span>
                   </div>
                 ))}
               </div>
@@ -1136,10 +1137,10 @@ export default function DashboardPage() {
                     <div key={e.id} className="flex items-center gap-1.5 text-[10px]">
                       <span
                         className={cn(
-                          "shrink-0 rounded border px-1 py-0 font-mono text-[9px]",
+                          "shrink-0 rounded border px-1 py-0 font-mono text-[10px]",
                           e.method === "GET"
-                            ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
-                            : "border-blue-500/30 bg-blue-500/10 text-blue-400",
+                            ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                            : "border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-400",
                         )}
                       >
                         {e.method}
@@ -1148,7 +1149,7 @@ export default function DashboardPage() {
                         {e.host}
                         {e.url.replace(/^https?:\/\/[^/]+/, "").substring(0, 30)}
                       </span>
-                      <span className={cn("shrink-0 font-mono text-[9px]", statusColor(e.status))}>{e.status}</span>
+                      <span className={cn("shrink-0 font-mono text-[10px]", statusColor(e.status))}>{e.status}</span>
                     </div>
                   ))}
                 </div>
@@ -1169,8 +1170,8 @@ export default function DashboardPage() {
                 className={cn(
                   "text-[10px]",
                   stats?.llm_configured
-                    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
-                    : "border-red-500/30 bg-red-500/10 text-red-400",
+                    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                    : "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400",
                 )}
               >
                 {stats?.llm_configured ? t("configured") : t("notConfigured")}
@@ -1184,7 +1185,7 @@ export default function DashboardPage() {
                 className={cn(
                   "text-[10px]",
                   settings?.traffic_capture
-                    ? "border-violet-500/30 bg-violet-500/10 text-violet-400"
+                    ? "border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-400"
                     : "text-muted-foreground",
                 )}
               >
@@ -1203,7 +1204,7 @@ export default function DashboardPage() {
           {/* pending approvals */}
           {pendingCount > 0 && (
             <div className="mt-3">
-              <div className="mb-1.5 text-[10px] font-medium text-amber-400">
+              <div className="mb-1.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">
                 {t("pendingApprovals", { count: pendingCount })}
               </div>
               <div className="flex flex-col gap-1.5">
@@ -1215,9 +1216,9 @@ export default function DashboardPage() {
                   >
                     <div className="min-w-0">
                       <div className="text-[10px] font-medium">{p.tool_name}</div>
-                      <div className="text-[9px] text-muted-foreground">{p.agent_name}</div>
+                      <div className="text-[10px] text-muted-foreground">{p.agent_name}</div>
                     </div>
-                    <ArrowUpRightIcon className="size-3 shrink-0 text-amber-400" />
+                    <ArrowUpRightIcon className="size-3 shrink-0 text-amber-700 dark:text-amber-400" />
                   </Link>
                 ))}
                 {pendingCount > 3 && (
@@ -1234,7 +1235,7 @@ export default function DashboardPage() {
 
           {pendingCount === 0 && (
             <div className="mt-3 rounded-lg border bg-muted/10 px-3 py-3 text-center text-[10px] text-muted-foreground">
-              <ShieldCheckIcon className="mx-auto mb-1 size-4 text-emerald-500/50" />
+              <ShieldCheckIcon className="mx-auto mb-1 size-4 text-emerald-700 dark:text-emerald-500/50" />
               {t("noPendingIntercepts")}
             </div>
           )}

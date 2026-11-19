@@ -94,7 +94,7 @@ export function MainContent({ children }: { children: ReactNode }) {
               className="mx-2 data-[orientation=vertical]:h-4 data-[orientation=vertical]:self-center"
             />
             <SearchDialog />
-            <span className="ml-1 hidden font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground/70 md:inline">
+            <span className="ml-1 hidden font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground md:inline">
               ▸ {pathname.replace(/\/+$/, "") || "/"}
             </span>
           </div>
@@ -107,7 +107,7 @@ export function MainContent({ children }: { children: ReactNode }) {
               <span className="tabular-nums">
                 RUN {inflight === null ? "—" : String(inflight).padStart(2, "0")}
               </span>
-              <span className="tabular-nums opacity-70">{clock}</span>
+              <span className="tabular-nums">{clock}</span>
             </span>
             {version && (
               <span className="font-medium text-muted-foreground text-xs tabular-nums">

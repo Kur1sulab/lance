@@ -495,7 +495,7 @@ export default function SystemSettingsPage() {
               <div className="flex flex-col gap-2">
                 <Label htmlFor="brave-key" className="text-sm font-normal text-muted-foreground">
                   {t("webSearch.braveKeyLabel")}
-                  {braveKeySet && <span className="ml-2 text-xs text-emerald-500">{t("configured")}</span>}
+                  {braveKeySet && <span className="ml-2 text-xs text-emerald-700 dark:text-emerald-500">{t("configured")}</span>}
                 </Label>
                 <div className="flex items-center gap-2">
                   <Input
@@ -517,7 +517,7 @@ export default function SystemSettingsPage() {
                     {t("save")}
                   </Button>
                 </div>
-                {braveNeedsKey && <p className="text-xs text-amber-500">{t("webSearch.braveNeedsKey")}</p>}
+                {braveNeedsKey && <p className="text-xs text-amber-700 dark:text-amber-500">{t("webSearch.braveNeedsKey")}</p>}
                 <p className="text-muted-foreground text-xs">{t("webSearch.braveQuota")}</p>
               </div>
             )}
@@ -526,7 +526,7 @@ export default function SystemSettingsPage() {
               <div className="flex flex-col gap-2">
                 <Label htmlFor="tavily-key" className="text-sm font-normal text-muted-foreground">
                   {t("webSearch.tavilyKeyLabel")}
-                  {tavilyKeySet && <span className="ml-2 text-xs text-emerald-500">{t("configured")}</span>}
+                  {tavilyKeySet && <span className="ml-2 text-xs text-emerald-700 dark:text-emerald-500">{t("configured")}</span>}
                 </Label>
                 <div className="flex items-center gap-2">
                   <Input
@@ -549,7 +549,7 @@ export default function SystemSettingsPage() {
                   </Button>
                 </div>
                 {webSearch && backend === "tavily" && !tavilyKeySet && (
-                  <p className="text-xs text-amber-500">{t("webSearch.tavilyNeedsKey")}</p>
+                  <p className="text-xs text-amber-700 dark:text-amber-500">{t("webSearch.tavilyNeedsKey")}</p>
                 )}
                 <p className="text-muted-foreground text-xs">{t("webSearch.tavilyGetKey")}</p>
               </div>

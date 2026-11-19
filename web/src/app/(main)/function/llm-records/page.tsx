@@ -453,7 +453,7 @@ export default function LLMRecordsPage() {
                         <span className="text-xs font-mono">{rec.model || "-"}</span>
                       </TableCell>
                       <TableCell>
-                        <span className={cn("text-xs", rec.latency_ms > 30000 && "text-amber-500")}>
+                        <span className={cn("text-xs", rec.latency_ms > 30000 && "text-amber-700 dark:text-amber-500")}>
                           {fmtLatency(rec.latency_ms)}
                         </span>
                       </TableCell>
@@ -501,7 +501,7 @@ export default function LLMRecordsPage() {
                 </Badge>
               )}
               <span className="text-xs text-muted-foreground">{fmtTime(selected.ts)}</span>
-              <span className={cn("text-xs", selected.latency_ms > 30000 && "text-amber-500")}>
+              <span className={cn("text-xs", selected.latency_ms > 30000 && "text-amber-700 dark:text-amber-500")}>
                 {fmtLatency(selected.latency_ms)}
               </span>
               {selected.status === "ok" ? (

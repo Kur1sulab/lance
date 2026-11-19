@@ -362,7 +362,7 @@ function AssetTreeRow({
           </span>
         )}
         {node.high > 0 && (
-          <span className="text-red-500" title={t("assetTree.highCount", { count: node.high })}>
+          <span className="text-red-700 dark:text-red-500" title={t("assetTree.highCount", { count: node.high })}>
             {node.high}
           </span>
         )}

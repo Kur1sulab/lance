@@ -104,10 +104,10 @@
     "inputUncached": "输入(未命中)",
     "llmConfig": "LLM 配置",
     "morePending": "还有 {count} 条…",
-    "noActivity": "暂无活动记录",
+    "noActivity": "还没有活动。开始任务后，工具调用和结果会实时出现在这里。",
     "noAssetData": "暂无资产数据",
     "noData": "暂无数据",
-    "noFindings": "暂无发现",
+    "noFindings": "还没有发现。任务确认漏洞后，会按严重度汇总到这里。",
     "noPendingIntercepts": "无待审批拦截",
     "noTasks": "暂无任务",
     "noTrafficData": "暂无流量数据",
@@ -146,7 +146,14 @@
     "trafficStatusCodes": "流量状态码",
     "verNew": "新版",
     "verOld": "旧版",
-    "viewTasks": "查看任务"
+    "viewTasks": "查看任务",
+    "activityKind": {
+      "tool_use": "工具调用",
+      "tool_result": "工具结果",
+      "text": "文本",
+      "thinking": "思考",
+      "result": "结果"
+    }
   },
   "header": {
     "updateBadge": "新版本 {latest}",
@@ -156,8 +163,11 @@
   },
   "nav": {
     "group": {
-      "function": "功能",
-      "system": "系统"
+      "war": "作战",
+      "target": "目标",
+      "capability": "能力",
+      "observe": "观测",
+      "govern": "治理"
     },
     "item": {
       "agents": "Agent",
@@ -165,7 +175,7 @@
       "asset-intercept": "资产拦截",
       "assets": "资产",
       "chat": "对话",
-      "commands": "工具执行",
+      "commands": "工具调用记录",
       "dashboard": "仪表盘",
       "findings": "发现",
       "intercept": "拦截规则",
@@ -191,7 +201,7 @@
     "title": "Page not found."
   },
   "search": {
-    "button": "Search",
+    "button": "搜索",
     "empty": "No results found.",
     "placeholder": "Search dashboards, users, and more…"
   },
@@ -2155,7 +2165,7 @@
     "colTool": "工具",
     "colInput": "输入",
     "colStatus": "状态",
-    "empty": "暂无工具执行记录",
+    "empty": "还没有工具执行记录。在对话或任务里调用工具后，这里会留下完整回显。",
     "failed": "失败",
     "success": "成功",
     "statsTitle": "工具调用统计",
@@ -2341,7 +2351,7 @@
     "unassigned": "未归属",
     "deleteAssetAria": "删除资产 {target}",
     "authFallback": "认证",
-    "emptyData": "暂无数据。",
+    "emptyData": "还没有资产。新建任务或同步资产后，这里会列出命中的目标。",
     "loading": "加载中…",
     "deleteDialog": {
       "title": "确认删除",
@@ -2990,8 +3000,10 @@
     "role": {
       "mainagent": "主 Agent",
       "planner": "规划 Planner",
-      "worker": "Workers",
-      "system": "系统审计"
+      "worker": "执行 Worker",
+      "system": "系统审计",
+      "chat": "对话",
+      "goal_decomp": "目标分解"
     },
     "title": {
       "main": "主 Agent · 会话 #{n}",

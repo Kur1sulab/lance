@@ -146,7 +146,14 @@
     "trafficStatusCodes": "Traffic status codes",
     "verNew": "New",
     "verOld": "Old",
-    "viewTasks": "View tasks"
+    "viewTasks": "View tasks",
+    "activityKind": {
+      "tool_use": "Tool call",
+      "tool_result": "Tool result",
+      "text": "Text",
+      "thinking": "Thinking",
+      "result": "Result"
+    }
   },
   "header": {
     "updateBadge": "New version {latest}",
@@ -156,8 +163,11 @@
   },
   "nav": {
     "group": {
-      "function": "Features",
-      "system": "System"
+      "war": "Operations",
+      "target": "Targets",
+      "capability": "Capabilities",
+      "observe": "Observability",
+      "govern": "Governance"
     },
     "item": {
       "agents": "Agents",
@@ -165,7 +175,7 @@
       "asset-intercept": "Asset blocking",
       "assets": "Assets",
       "chat": "Chat",
-      "commands": "Tool runs",
+      "commands": "Tool call log",
       "dashboard": "Dashboard",
       "findings": "Findings",
       "intercept": "Intercept rules",
@@ -2991,7 +3001,9 @@
       "mainagent": "Main agent",
       "planner": "Planner",
       "worker": "Workers",
-      "system": "System audit"
+      "system": "System audit",
+      "chat": "Chat",
+      "goal_decomp": "Goal decomposition"
     },
     "title": {
       "main": "Main agent · session #{n}",

@@ -12,7 +12,8 @@ export const toneClasses: Record<Tone, string> = {
   amber: "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/20",
   red: "bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/20",
   // rose 用作「严重」——实心高强调,视觉上明显高于「高危」的软红描边。
-  rose: "bg-rose-600 text-white border-rose-600 dark:bg-rose-600 dark:text-white",
+  // 暗色档各主题的 rose-600 都偏亮（灰阶/亮彩），白字压不住，统一黑字。
+  rose: "bg-rose-600 text-white border-rose-600 dark:bg-rose-600 dark:text-black",
   violet: "bg-violet-500/15 text-violet-600 dark:text-violet-400 border-violet-500/20",
   slate: "bg-slate-500/15 text-slate-600 dark:text-slate-400 border-slate-500/20",
 };
@@ -23,7 +24,7 @@ export const toneDot: Record<Tone, string> = {
   green: "bg-emerald-500",
   amber: "bg-amber-500",
   red: "bg-red-500",
-  rose: "bg-white",
+  rose: "bg-white dark:bg-black",
   violet: "bg-violet-500",
   slate: "bg-slate-500",
 };

@@ -146,7 +146,14 @@
     "trafficStatusCodes": "トラフィックのステータスコード",
     "verNew": "新バージョン",
     "verOld": "旧バージョン",
-    "viewTasks": "タスクを見る"
+    "viewTasks": "タスクを見る",
+    "activityKind": {
+      "tool_use": "ツール呼び出し",
+      "tool_result": "ツール結果",
+      "text": "テキスト",
+      "thinking": "思考",
+      "result": "結果"
+    }
   },
   "header": {
     "updateBadge": "新バージョン {latest}",
@@ -156,8 +163,11 @@
   },
   "nav": {
     "group": {
-      "function": "機能",
-      "system": "システム"
+      "war": "作戦",
+      "target": "ターゲット",
+      "capability": "ケイパビリティ",
+      "observe": "オブザーバビリティ",
+      "govern": "ガバナンス"
     },
     "item": {
       "agents": "エージェント",
@@ -165,7 +175,7 @@
       "asset-intercept": "資産ブロック",
       "assets": "資産",
       "chat": "チャット",
-      "commands": "ツール実行",
+      "commands": "ツール呼び出し記録",
       "dashboard": "ダッシュボード",
       "findings": "脆弱性",
       "intercept": "インターセプトルール",
@@ -2991,7 +3001,9 @@
       "mainagent": "メインエージェント",
       "planner": "プランナー",
       "worker": "Workers",
-      "system": "システム監査"
+      "system": "システム監査",
+      "chat": "チャット",
+      "goal_decomp": "目標分解"
     },
     "title": {
       "main": "メインエージェント · セッション #{n}",
