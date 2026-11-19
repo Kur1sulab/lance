@@ -6,6 +6,8 @@ import { PlusIcon, RefreshCwIcon, ServerIcon, Trash2Icon } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
+import { StateBoundary } from "@/components/data/state-boundary";
+import { PageShell } from "@/components/shell/page-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,8 +18,10 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { usePermissionDenied } from "@/hooks/use-permission-denied";
 import { useAgentLabels } from "@/lib/agent-i18n";
 import { api } from "@/lib/api";
+import { errorCodeOf } from "@/lib/api-error";
 import type { Agent, MCPServer, MCPTool } from "@/lib/types";
 
 type Transport = "stdio" | "http" | "sse";
@@ -42,6 +46,19 @@ const emptyForm: FormState = {
 
 export default function MCPPage() {
   const t = useTranslations("mcpPage");
+  const tn = useTranslations("nav");
+  const tp = useTranslations("pageStates");
+  const { denied, check: checkPermission, reset: resetPermission } = usePermissionDenied();
+  const lastError = React.useRef<unknown>(null);
+  const [error, setError] = React.useState<string | null>(null);
+  // 首屏骨架开关：agents 与 mcpServers 两条请求都落地（成功或失败）才收起骨架，
+  // 否则先到的那条会把「还在加载」渲染成「一个服务都没接」。
+  const [loading, setLoading] = React.useState(true);
+  const inflight = React.useRef(2);
+  const settle = React.useCallback(() => {
+    inflight.current -= 1;
+    if (inflight.current <= 0) setLoading(false);
+  }, []);
   const agentLabels = useAgentLabels();
   const [servers, setServers] = React.useState<MCPServer[]>([]);
   const [agents, setAgents] = React.useState<Agent[]>([]);
@@ -57,12 +74,18 @@ export default function MCPPage() {
   const [refreshing, setRefreshing] = React.useState(false);
 
   const load = React.useCallback(() => {
+    inflight.current = 2;
     api
       .agents()
       .then(setAgents)
-      .catch(() => {
-        /* 查询失败时忽略并保持默认状态 */
-      });
+      .catch((e) => {
+        // 原来这里静默忽略：agent 列表读不到时可见性勾选框会全空，
+        // 看起来像「没有 agent 能看这个服务」，得把真实原因说出来。
+        lastError.current = e;
+        checkPermission(e);
+        setError((e as Error).message);
+      })
+      .finally(settle);
     api
       .mcpServers()
       .then((ss) => {
@@ -76,10 +99,13 @@ export default function MCPPage() {
             });
         });
       })
-      .catch(() => {
-        /* 查询失败时忽略并保持默认状态 */
-      });
-  }, []);
+      .catch((e) => {
+        lastError.current = e;
+        checkPermission(e);
+        setError((e as Error).message);
+      })
+      .finally(settle);
+  }, [checkPermission, settle]);
   React.useEffect(() => {
     load();
   }, [load]);
@@ -357,68 +383,115 @@ export default function MCPPage() {
   }
 
   return (
-    <div className="flex flex-1 flex-col gap-4 md:gap-6">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight">MCP</h1>
-        <p className="text-muted-foreground text-sm">{t("subtitle")}</p>
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        <button
-          type="button"
-          onClick={openAdd}
-          className="text-foreground/70 border-foreground/70 hover:bg-muted/60 hover:shadow-sm flex min-h-[116px] flex-col items-center justify-center gap-2 rounded-xl border border-dashed transition"
+    <PageShell
+      title={tn("item.mcp")}
+      description={t("subtitle")}
+      breadcrumb={[{ label: tn("group.capability"), href: "/dashboard" }, { label: tn("item.mcp") }]}
+    >
+      <div className="px-4 py-3 md:px-6">
+        <StateBoundary
+          loading={loading}
+          error={
+            error
+              ? {
+                  title: tp("errorTitle"),
+                  detail: tp("errorDetail"),
+                  code: errorCodeOf(lastError.current),
+                  codeLabel: tp("errorCodeLabel"),
+                  retryLabel: tp("retry"),
+                }
+              : null
+          }
+          permission={denied ? "mcp:read" : null}
+          permissionProps={{
+            title: tp("permissionTitle"),
+            detail: tp("permissionDetail", { name: tn("item.mcp"), ask: tp("askAdmin") }),
+            missingLabel: tp("permissionMissing"),
+            askLabel: tp("permissionAsk"),
+            ask: tp("askAdmin"),
+          }}
+          empty={servers.length === 0}
+          emptyProps={{
+            title: tp("emptyTitle"),
+            reason: tp("empty.mcp"),
+            nextStep: { label: t("addServer"), onClick: openAdd },
+          }}
+          skeleton={
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div
+                  // biome-ignore lint/suspicious/noArrayIndexKey: 骨架屏占位，无真实数据标识。
+                  key={i}
+                  className="h-[116px] animate-pulse rounded-xl bg-muted"
+                />
+              ))}
+            </div>
+          }
+          onRetry={() => {
+            setError(null);
+            lastError.current = null;
+            resetPermission();
+            load();
+          }}
         >
-          <PlusIcon className="size-6" />
-          <span className="text-sm">{t("addCard")}</span>
-        </button>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            <button
+              type="button"
+              onClick={openAdd}
+              className="text-foreground/70 border-foreground/70 hover:bg-muted/60 hover:shadow-sm flex min-h-[116px] flex-col items-center justify-center gap-2 rounded-xl border border-dashed transition"
+            >
+              <PlusIcon className="size-6" />
+              <span className="text-sm">{t("addCard")}</span>
+            </button>
 
-        {servers.map((s) => (
-          <Card
-            key={s.id}
-            onClick={() => openEdit(s)}
-            className="hover:border-primary/60 cursor-pointer gap-3 transition hover:shadow-sm"
-          >
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <ServerIcon className="text-muted-foreground size-4 shrink-0" />
-                <CardTitle className="truncate text-base">{s.name}</CardTitle>
-                <Badge variant="outline" className="shrink-0 uppercase">
-                  {s.transport}
-                </Badge>
-                {/* biome-ignore lint/a11y/noStaticElementInteractions: 仅用于拦截向父卡片点击传播的容器。这个 div 本身不是交互元素，内部的 Switch 和删除按钮分别可通过键盘访问 */}
-                {/* biome-ignore lint/a11y/useKeyWithClickEvents: 如上所述，仅用于拦截点击传播，因此不需要单独的键盘处理器 */}
-                <div className="ml-auto flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                  <Switch checked={s.enabled} onCheckedChange={() => toggleEnabled(s)} aria-label={t("enableAria")} />
-                  <Button size="icon" variant="outline" aria-label={t("deleteAria")} onClick={() => removeServer(s)}>
-                    <Trash2Icon className="text-destructive" />
-                  </Button>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="grid gap-3">
-              <p className="text-muted-foreground text-sm">
-                {s.tools && s.tools.length > 0 ? t("toolCount", { count: s.tools.length }) : t("noTools")}
-              </p>
-              {/* biome-ignore lint/a11y/noStaticElementInteractions: 仅用于拦截复选框区域点击传播的容器。这个 div 本身不是交互元素，内部复选框分别可通过键盘访问 */}
-              {/* biome-ignore lint/a11y/useKeyWithClickEvents: 如上所述，仅用于拦截点击传播，因此不需要单独的键盘处理器 */}
-              <div className="grid gap-2" onClick={(e) => e.stopPropagation()}>
-                <span className="text-muted-foreground text-xs">{t("visibilityLabel")}</span>
-                <div className="flex flex-wrap gap-x-4 gap-y-2">
-                  {agents.map((a) => (
-                    <label key={a.key} className="flex items-center gap-2 text-sm">
-                      <Checkbox
-                        checked={(visibility[s.id] ?? []).includes(a.id)}
-                        onCheckedChange={() => toggleVisibility(s.id, a.id, agentLabels.name(a))}
-                      />
-                      {agentLabels.name(a)}
-                    </label>
-                  ))}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+            {servers.map((s) => (
+              <Card
+                key={s.id}
+                onClick={() => openEdit(s)}
+                className="hover:border-primary/60 cursor-pointer gap-3 transition hover:shadow-sm"
+              >
+                <CardHeader>
+                  <div className="flex items-center gap-2">
+                    <ServerIcon className="text-muted-foreground size-4 shrink-0" />
+                    <CardTitle className="truncate text-base">{s.name}</CardTitle>
+                    <Badge variant="outline" className="shrink-0 uppercase">
+                      {s.transport}
+                    </Badge>
+                    {/* biome-ignore lint/a11y/noStaticElementInteractions: 仅用于拦截向父卡片点击传播的容器。这个 div 本身不是交互元素，内部的 Switch 和删除按钮分别可通过键盘访问 */}
+                    {/* biome-ignore lint/a11y/useKeyWithClickEvents: 如上所述，仅用于拦截点击传播，因此不需要单独的键盘处理器 */}
+                    <div className="ml-auto flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                      <Switch checked={s.enabled} onCheckedChange={() => toggleEnabled(s)} aria-label={t("enableAria")} />
+                      <Button size="icon" variant="outline" aria-label={t("deleteAria")} onClick={() => removeServer(s)}>
+                        <Trash2Icon className="text-destructive" />
+                      </Button>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="grid gap-3">
+                  <p className="text-muted-foreground text-sm">
+                    {s.tools && s.tools.length > 0 ? t("toolCount", { count: s.tools.length }) : t("noTools")}
+                  </p>
+                  {/* biome-ignore lint/a11y/noStaticElementInteractions: 仅用于拦截复选框区域点击传播的容器。这个 div 本身不是交互元素，内部复选框分别可通过键盘访问 */}
+                  {/* biome-ignore lint/a11y/useKeyWithClickEvents: 如上所述，仅用于拦截点击传播，因此不需要单独的键盘处理器 */}
+                  <div className="grid gap-2" onClick={(e) => e.stopPropagation()}>
+                    <span className="text-muted-foreground text-xs">{t("visibilityLabel")}</span>
+                    <div className="flex flex-wrap gap-x-4 gap-y-2">
+                      {agents.map((a) => (
+                        <label key={a.key} className="flex items-center gap-2 text-sm">
+                          <Checkbox
+                            checked={(visibility[s.id] ?? []).includes(a.id)}
+                            onCheckedChange={() => toggleVisibility(s.id, a.id, agentLabels.name(a))}
+                          />
+                          {agentLabels.name(a)}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </StateBoundary>
       </div>
 
       <Sheet open={open} onOpenChange={setOpen}>
@@ -465,6 +538,6 @@ export default function MCPPage() {
           )}
         </SheetContent>
       </Sheet>
-    </div>
+    </PageShell>
   );
 }

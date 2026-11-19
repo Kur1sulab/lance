@@ -8,13 +8,15 @@ import {
   ChevronRightIcon,
   CopyIcon,
   Loader2Icon,
-  RadioIcon,
   SearchIcon,
   Trash2Icon,
   XIcon,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 
+import { StateBoundary } from "@/components/data/state-boundary";
+import { PageShell } from "@/components/shell/page-shell";
+import { Toolbar } from "@/components/shell/toolbar";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -32,8 +34,10 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { usePermissionDenied } from "@/hooks/use-permission-denied";
 import { getDateLocale } from "@/i18n/datetime";
 import { api } from "@/lib/api";
+import { errorCodeOf } from "@/lib/api-error";
 import type { LLMRecordDetail, LLMRecordItem, LLMTask } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -111,7 +115,7 @@ function CopyButton({ text }: { text: string }) {
       title={copied ? t("copyCopied") : t("copyTooltip")}
       onClick={copy}
     >
-      {copied ? <CheckIcon className="size-3 text-emerald-600" /> : <CopyIcon className="size-3" />}
+      {copied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
     </Button>
   );
 }
@@ -121,6 +125,11 @@ const PAGE_SIZES = [25, 50, 100];
 export default function LLMRecordsPage() {
   const t = useTranslations("llmRecords");
   const tp = useTranslations("pagination");
+  const tn = useTranslations("nav");
+  const tps = useTranslations("pageStates");
+  const perm = usePermissionDenied();
+  const lastError = React.useRef<unknown>(null);
+  const [error, setError] = React.useState<string | null>(null);
   const [page, setPage] = React.useState(0);
   const [size, setSize] = React.useState(50);
   const [session, setSession] = React.useState("");
@@ -219,9 +228,15 @@ export default function LLMRecordsPage() {
         if (!alive) return;
         setRecords(r.records ?? []);
         setTotal(r.total ?? 0);
+        setError(null);
+        lastError.current = null;
+        perm.reset();
       })
-      .catch(() => {
-        /* 查询失败则忽略（在 finally 中解除加载状态） */
+      .catch((e) => {
+        lastError.current = e;
+        perm.check(e);
+        if (!alive) return;
+        setError(e instanceof Error ? e.message : String(e));
       })
       .finally(() => alive && setLoading(false));
     api
@@ -286,28 +301,25 @@ export default function LLMRecordsPage() {
   const rangeEnd = page * size + records.length;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4">
-      {/* Header */}
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-2">
-          <RadioIcon className="h-5 w-5 text-muted-foreground" />
-          <h1 className="text-xl font-semibold tracking-tight">{t("title")}</h1>
-          <Badge variant="secondary">{total}</Badge>
-        </div>
-      </div>
-
-      {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative max-w-sm flex-1">
-          <SearchIcon className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder={t("searchPlaceholder")}
-            value={session}
-            onChange={(e) => setSession(e.target.value)}
-            className="h-8 pl-8"
-          />
-        </div>
-        <Input placeholder="Model" className="h-8 w-48" value={model} onChange={(e) => setModel(e.target.value)} />
+    <PageShell
+      title={t("title")}
+      breadcrumb={[{ label: tn("group.observe"), href: "/dashboard" }, { label: tn("item.llm-records") }]}
+      toolbar={
+        <Toolbar
+          search={
+            <div className="relative">
+              <SearchIcon className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder={t("searchPlaceholder")}
+                value={session}
+                onChange={(e) => setSession(e.target.value)}
+                className="h-8 pl-8"
+              />
+            </div>
+          }
+          filters={
+            <>
+              <Input placeholder="Model" className="h-8 w-48" value={model} onChange={(e) => setModel(e.target.value)} />
         <Select value={pickedTask} onValueChange={setPickedTask}>
           <SelectTrigger size="sm" className="w-56">
             <SelectValue placeholder={t("taskPlaceholder")} />
@@ -371,8 +383,10 @@ export default function LLMRecordsPage() {
             {recEnabled ? t("recording") : t("recordingOff")}
           </label>
         </div>
-
-        <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
+            </>
+          }
+          viewSwitch={
+            <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
           <span className="tabular-nums">
             {rangeStart}–{rangeEnd} / {total}
           </span>
@@ -398,10 +412,43 @@ export default function LLMRecordsPage() {
             <ChevronRightIcon />
           </Button>
         </div>
-      </div>
-
-      {/* History table + inline detail (Burp-style split) */}
-      <div className="flex h-[calc(100vh-13rem)] min-h-0 flex-col gap-3">
+          }
+        />
+      }
+    >
+      <div className="px-4 py-3 md:px-6">
+        <div className="flex h-[calc(100vh-13rem)] min-h-0 flex-col gap-3">
+          <StateBoundary
+            className="flex min-h-0 flex-1 flex-col"
+            loading={loading && records.length === 0}
+            error={
+              error
+                ? {
+                    title: tps("errorTitle"),
+                    detail: tps("errorDetail"),
+                    code: errorCodeOf(lastError.current),
+                    codeLabel: tps("errorCodeLabel"),
+                    retryLabel: tps("retry"),
+                  }
+                : null
+            }
+            permission={perm.denied ? "llmRecords:read" : null}
+            permissionProps={{
+              title: tps("permissionTitle"),
+              detail: tps("permissionDetail", { name: tn("item.llm-records"), ask: tps("askAdmin") }),
+              missingLabel: tps("permissionMissing"),
+              askLabel: tps("permissionAsk"),
+              ask: tps("askAdmin"),
+            }}
+            empty={!loading && !error && records.length === 0}
+            emptyProps={{ title: tps("emptyTitle"), reason: tps("empty.llmRecords") }}
+            onRetry={() => {
+              setError(null);
+              lastError.current = null;
+              perm.reset();
+              setReloadTick((n) => n + 1);
+            }}
+          >
         <Card className="flex min-h-0 flex-1 flex-col overflow-hidden py-0">
           <div className="min-h-0 flex-1 overflow-auto">
             <Table>
@@ -418,20 +465,7 @@ export default function LLMRecordsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {loading && records.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={8} className="py-12 text-center">
-                      <Loader2Icon className="mx-auto h-5 w-5 animate-spin text-muted-foreground" />
-                    </TableCell>
-                  </TableRow>
-                ) : records.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={8} className="py-12 text-center text-sm text-muted-foreground">
-                      {t("empty")}
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  records.map((rec) => (
+                {records.map((rec) => (
                     <TableRow
                       key={rec.id}
                       className={cn("cursor-pointer", selected?.id === rec.id && "bg-accent hover:bg-accent")}
@@ -453,7 +487,7 @@ export default function LLMRecordsPage() {
                         <span className="text-xs font-mono">{rec.model || "-"}</span>
                       </TableCell>
                       <TableCell>
-                        <span className={cn("text-xs", rec.latency_ms > 30000 && "text-amber-700 dark:text-amber-500")}>
+                        <span className={cn("text-xs", rec.latency_ms > 30000 && "font-medium text-foreground")}>
                           {fmtLatency(rec.latency_ms)}
                         </span>
                       </TableCell>
@@ -464,7 +498,7 @@ export default function LLMRecordsPage() {
                       </TableCell>
                       <TableCell>
                         {rec.status === "ok" ? (
-                          <Badge variant="secondary" className="text-xs text-emerald-600">
+                          <Badge variant="secondary" className="text-xs">
                             OK
                           </Badge>
                         ) : (
@@ -474,12 +508,12 @@ export default function LLMRecordsPage() {
                         )}
                       </TableCell>
                     </TableRow>
-                  ))
-                )}
+                  ))}
               </TableBody>
             </Table>
           </div>
         </Card>
+          </StateBoundary>
 
         {/* Inline detail panel */}
         {selected && (
@@ -501,11 +535,11 @@ export default function LLMRecordsPage() {
                 </Badge>
               )}
               <span className="text-xs text-muted-foreground">{fmtTime(selected.ts)}</span>
-              <span className={cn("text-xs", selected.latency_ms > 30000 && "text-amber-700 dark:text-amber-500")}>
+              <span className={cn("text-xs", selected.latency_ms > 30000 && "font-medium text-foreground")}>
                 {fmtLatency(selected.latency_ms)}
               </span>
               {selected.status === "ok" ? (
-                <Badge variant="secondary" className="text-xs text-emerald-600">
+                <Badge variant="secondary" className="text-xs">
                   OK
                 </Badge>
               ) : (
@@ -564,7 +598,7 @@ export default function LLMRecordsPage() {
                     <pre
                       className={cn(
                         "p-3 font-mono text-xs break-all whitespace-pre-wrap",
-                        selected.status !== "ok" && "text-red-600 dark:text-red-400",
+                        selected.status !== "ok" && "text-destructive",
                       )}
                     >
                       {respText || t("emptyContent")}
@@ -598,6 +632,7 @@ export default function LLMRecordsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+      </div>
+    </PageShell>
   );
 }

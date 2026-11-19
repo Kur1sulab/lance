@@ -48,7 +48,10 @@ import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { AssetInterceptRulesEditor } from "@/components/asset-intercept-rules-editor";
+import { StateBoundary } from "@/components/data/state-boundary";
 import { TaskDrawer } from "@/components/domain/task-drawer";
+import { PageShell } from "@/components/shell/page-shell";
+import { Toolbar } from "@/components/shell/toolbar";
 import { StatusBadge } from "@/components/status-badge";
 import { TablePagination } from "@/components/table-pagination";
 import { TaskLLMProfileChain } from "@/components/task-llm-profile-chain";
@@ -123,7 +126,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDetailParam } from "@/hooks/use-detail-param";
+import { usePermissionDenied } from "@/hooks/use-permission-denied";
 import { ApiError, api } from "@/lib/api";
+import { errorCodeOf, errorMessageOf } from "@/lib/api-error";
 import { getLocalStorageValue, setLocalStorageValue } from "@/lib/local-storage.client";
 import { type SortDirection, useStoredSortPreference } from "@/lib/sort-preference";
 import type {
@@ -312,9 +317,18 @@ function TasksPageInner() {
   // 详情抽屉：?id= 与 URL 双向同步（设计文档 §四）
   const detail = useDetailParam();
   const ts = useTranslations("status");
+  const tn = useTranslations("nav");
+  const tp = useTranslations("pageStates");
+  const perm = usePermissionDenied();
+  // perm.check 是稳定引用，load 的 useCallback 依赖它不会破坏轮询的 setInterval。
+  const checkPermission = perm.check;
+  const lastError = React.useRef<unknown>(null);
+  const loadedRef = React.useRef(false);
   const router = useRouter();
   const [activeTab, setActiveTab] = React.useState("current");
   const [tasks, setTasks] = React.useState<Task[]>([]);
+  const [loaded, setLoaded] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
   const [categories, setCategories] = React.useState<TaskCategory[]>([]);
   const [categoriesLoaded, setCategoriesLoaded] = React.useState(false);
   const [query, setQuery] = React.useState("");
@@ -467,16 +481,27 @@ function TasksPageInner() {
     api
       .tasks()
       .then((r) => {
+        // 四态：成功即算「已加载」，并清掉上一轮错误（轮询失败后能自愈）。
+        // 必须放在 lastRef 去重之前——载荷不变时下面会提前 return。
+        loadedRef.current = true;
+        setLoaded(true);
+        setError(null);
         const next = r.tasks.map((t) => (t.id === r.active ? { ...t, active: true } : t));
         const sig = JSON.stringify(next);
         if (sig === lastRef.current) return;
         lastRef.current = sig;
         setTasks(next);
       })
-      .catch(() => {
+      .catch((e) => {
         // Polling is best-effort; the next interval retries automatically.
+        // 但首屏失败必须留下错误态，否则页面会永远停在骨架屏上。
+        checkPermission(e);
+        if (!loadedRef.current) {
+          lastError.current = e;
+          setError(errorMessageOf(e));
+        }
       });
-  }, []);
+  }, [checkPermission]);
 
   const loadCategories = React.useCallback(() => {
     api
@@ -821,22 +846,36 @@ function TasksPageInner() {
   );
 
   return (
-    <Tabs value={activeTab} onValueChange={setActiveTab} className="gap-4">
-      <TabsList className="mx-4 lg:mx-6">
-        <TabsTrigger value="current">{t("tab.current")}</TabsTrigger>
-        <TabsTrigger value="archived">{t("tab.archived")}</TabsTrigger>
-      </TabsList>
-      <TabsContent value="current">
-        <Card>
-          <CardContent className="flex flex-col gap-4 px-0 pt-6">
-            <div className="flex flex-wrap items-center gap-2 px-4 lg:px-6">
-              <div className="relative w-full sm:max-w-xs">
+    <Tabs value={activeTab} onValueChange={setActiveTab} className="flex h-full min-h-0 flex-col gap-0">
+      <PageShell
+        title={tn("item.tasks")}
+        breadcrumb={[{ label: tn("group.war"), href: "/dashboard" }, { label: tn("item.tasks") }]}
+        actions={
+          <>
+            <CategoryManagementSheet
+              categories={categories}
+              tasks={tasks}
+              onChanged={refreshCategoriesAndTasks}
+              onTaskMoved={applyTaskCategoryMove}
+            />
+            <CreateTaskSheet
+              tasks={tasks}
+              categories={categories}
+              onCreated={refreshCategoriesAndTasks}
+              onCategoriesChanged={refreshCategoriesAndTasks}
+            />
+          </>
+        }
+        toolbar={
+          <Toolbar
+            search={
+              <div className="relative">
                 <SearchIcon className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2" />
                 <Input
                   placeholder={t("filter.searchPlaceholder")}
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  className="pl-8"
+                  className="h-8 pl-8"
                 />
                 {query && (
                   <button
@@ -849,222 +888,246 @@ function TasksPageInner() {
                   </button>
                 )}
               </div>
-              <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as TaskStatus | "all")}>
-                <SelectTrigger className="w-36">
-                  <SelectValue placeholder={t("filter.statusPlaceholder")} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem value="all">{t("filter.allStatus")}</SelectItem>
-                    {STATUS_OPTIONS.map((status) => (
-                      <SelectItem key={status} value={status}>
-                        {ts(`task.${status}`)}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-              <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                <SelectTrigger className="w-40">
-                  <SelectValue placeholder={t("filter.categoryPlaceholder")} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem value="all">{t("filter.allCategory")}</SelectItem>
-                    <SelectItem value={UNCATEGORIZED_VALUE}>{t("filter.uncategorized")}</SelectItem>
-                    {categories.map((category) => (
-                      <SelectItem key={category.id} value={String(category.id)}>
-                        {category.name}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-              <span className="text-muted-foreground text-xs tabular-nums">
-                {t("count", { shown: filtered.length, total: tasks.length })}
-              </span>
-              {selectedIds.size > 0 && (
-                <>
-                  <span className="text-xs tabular-nums">{t("selected", { count: selectedIds.size })}</span>
-                  <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>
-                    {t("clearSelection")}
-                  </Button>
-                  {pausableTaskIDs.length > 0 && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={batchControlling !== null}
-                      onClick={() => void controlSelectedTasks("pause", pausableTaskIDs)}
-                    >
-                      {batchControlling === "pause" ? (
-                        <Spinner data-icon="inline-start" />
-                      ) : (
-                        <PauseIcon data-icon="inline-start" />
-                      )}
-                      {t("batchPause", { count: pausableTaskIDs.length })}
+            }
+            filters={
+              <>
+                <TabsList>
+                  <TabsTrigger value="current">{t("tab.current")}</TabsTrigger>
+                  <TabsTrigger value="archived">{t("tab.archived")}</TabsTrigger>
+                </TabsList>
+                <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as TaskStatus | "all")}>
+                  <SelectTrigger className="w-36">
+                    <SelectValue placeholder={t("filter.statusPlaceholder")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectItem value="all">{t("filter.allStatus")}</SelectItem>
+                      {STATUS_OPTIONS.map((status) => (
+                        <SelectItem key={status} value={status}>
+                          {ts(`task.${status}`)}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+                <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                  <SelectTrigger className="w-40">
+                    <SelectValue placeholder={t("filter.categoryPlaceholder")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectItem value="all">{t("filter.allCategory")}</SelectItem>
+                      <SelectItem value={UNCATEGORIZED_VALUE}>{t("filter.uncategorized")}</SelectItem>
+                      {categories.map((category) => (
+                        <SelectItem key={category.id} value={String(category.id)}>
+                          {category.name}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+                <span className="text-muted-foreground text-xs tabular-nums">
+                  {t("count", { shown: filtered.length, total: tasks.length })}
+                </span>
+                {selectedIds.size > 0 && (
+                  <>
+                    <span className="text-xs tabular-nums">{t("selected", { count: selectedIds.size })}</span>
+                    <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>
+                      {t("clearSelection")}
                     </Button>
-                  )}
-                  {resumableTaskIDs.length > 0 && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={batchControlling !== null}
-                      onClick={() => void controlSelectedTasks("resume", resumableTaskIDs)}
-                    >
-                      {batchControlling === "resume" ? (
-                        <Spinner data-icon="inline-start" />
-                      ) : (
-                        <PlayIcon data-icon="inline-start" />
-                      )}
-                      {t("batchResume", { count: resumableTaskIDs.length })}
-                    </Button>
-                  )}
-                  {archivableTaskIDs.length > 0 && (
-                    <ArchiveConfirmDialog
-                      count={archivableTaskIDs.length}
-                      onConfirm={archiveSelectedTasks}
-                      trigger={
-                        <Button size="sm" variant="outline">
-                          <ArchiveIcon data-icon="inline-start" />
-                          {t("batchArchive", { count: archivableTaskIDs.length })}
-                        </Button>
-                      }
+                    {pausableTaskIDs.length > 0 && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={batchControlling !== null}
+                        onClick={() => void controlSelectedTasks("pause", pausableTaskIDs)}
+                      >
+                        {batchControlling === "pause" ? (
+                          <Spinner data-icon="inline-start" />
+                        ) : (
+                          <PauseIcon data-icon="inline-start" />
+                        )}
+                        {t("batchPause", { count: pausableTaskIDs.length })}
+                      </Button>
+                    )}
+                    {resumableTaskIDs.length > 0 && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={batchControlling !== null}
+                        onClick={() => void controlSelectedTasks("resume", resumableTaskIDs)}
+                      >
+                        {batchControlling === "resume" ? (
+                          <Spinner data-icon="inline-start" />
+                        ) : (
+                          <PlayIcon data-icon="inline-start" />
+                        )}
+                        {t("batchResume", { count: resumableTaskIDs.length })}
+                      </Button>
+                    )}
+                    {archivableTaskIDs.length > 0 && (
+                      <ArchiveConfirmDialog
+                        count={archivableTaskIDs.length}
+                        onConfirm={archiveSelectedTasks}
+                        trigger={
+                          <Button size="sm" variant="outline">
+                            <ArchiveIcon data-icon="inline-start" />
+                            {t("batchArchive", { count: archivableTaskIDs.length })}
+                          </Button>
+                        }
+                      />
+                    )}
+                    <MoveTasksCategoryDialog
+                      categories={categories}
+                      count={selectedIds.size}
+                      moving={movingCategory}
+                      onMove={moveSelectedTasksCategory}
                     />
-                  )}
-                  <MoveTasksCategoryDialog
-                    categories={categories}
-                    count={selectedIds.size}
-                    moving={movingCategory}
-                    onMove={moveSelectedTasksCategory}
+                    <BulkDeleteTasksDialog ids={[...selectedIds]} onDelete={deleteTasks} />
+                  </>
+                )}
+                <ConcurrencySettingsDialog />
+              </>
+            }
+          />
+        }
+      >
+        <div className="px-4 py-3 md:px-6">
+          <StateBoundary
+            loading={activeTab === "current" && !loaded}
+            error={
+              error
+                ? {
+                    title: tp("errorTitle"),
+                    detail: tp("errorDetail"),
+                    code: errorCodeOf(lastError.current),
+                    codeLabel: tp("errorCodeLabel"),
+                    retryLabel: tp("retry"),
+                  }
+                : null
+            }
+            permission={perm.denied ? "tasks:read" : null}
+            permissionProps={{
+              title: tp("permissionTitle"),
+              detail: tp("permissionDetail", { name: tn("item.tasks"), ask: tp("askAdmin") }),
+              missingLabel: tp("permissionMissing"),
+              askLabel: tp("permissionAsk"),
+              ask: tp("askAdmin"),
+            }}
+            empty={activeTab === "current" && loaded && !error && filtered.length === 0}
+            emptyProps={{ title: tp("emptyTitle"), reason: tp("empty.tasks") }}
+            onRetry={() => {
+              // 重新取数：清掉上一轮的错误/权限标记，骨架屏重新出现。
+              loadedRef.current = false;
+              setLoaded(false);
+              setError(null);
+              lastError.current = null;
+              lastRef.current = "";
+              perm.reset();
+              load();
+            }}
+          >
+            <TabsContent value="current">
+              <Card>
+                <CardContent className="flex flex-col gap-4 px-0 pt-0">
+                  <div className="@container">
+                    <Table className="**:data-[slot='table-cell']:px-4 **:data-[slot='table-head']:px-4">
+                      <TableHeader className="[&_tr]:border-t">
+                        <TableRow>
+                          <TableHead className="w-10">
+                            <Checkbox
+                              checked={headerChecked}
+                              onCheckedChange={(checked) => toggleSelectedPage(checked === true)}
+                              aria-label={t("table.selectAllAria")}
+                            />
+                          </TableHead>
+                          <SortableTaskHead
+                            field="id"
+                            label="ID"
+                            activeField={sortField}
+                            direction={sortDirection}
+                            className="font-mono"
+                            onSort={sortTasksBy}
+                          />
+                          <TableHead>{t("table.name")}</TableHead>
+                          <TableHead className="hidden @5xl:table-cell">{t("table.description")}</TableHead>
+                          <TableHead>{t("table.target")}</TableHead>
+                          <SortableTaskHead
+                            field="status"
+                            label={t("table.status")}
+                            activeField={sortField}
+                            direction={sortDirection}
+                            onSort={sortTasksBy}
+                          />
+                          <TableHead className="hidden text-center @3xl:table-cell">{t("table.goalProgress")}</TableHead>
+                          <TableHead className="text-center" title={t("table.findingsTitle")}>
+                            {t("table.findings")}{" "}
+                            <span className="text-muted-foreground font-normal">{t("table.findingsSub")}</span>
+                          </TableHead>
+                          <TableHead className="hidden text-center @4xl:table-cell">{t("table.runningWorker")}</TableHead>
+                          <SortableTaskHead
+                            field="created"
+                            label={t("table.created")}
+                            activeField={sortField}
+                            direction={sortDirection}
+                            align="right"
+                            className="hidden @6xl:table-cell"
+                            onSort={sortTasksBy}
+                          />
+                          <SortableTaskHead
+                            field="duration"
+                            label={t("table.duration")}
+                            activeField={sortField}
+                            direction={sortDirection}
+                            align="right"
+                            className="hidden @6xl:table-cell"
+                            onSort={sortTasksBy}
+                          />
+                          <TableHead className="hidden text-right @7xl:table-cell">Token</TableHead>
+                          <TableHead className="text-right">{t("table.actions")}</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {paginated.map((task) => (
+                          <TaskRow
+                            key={task.id}
+                            task={task}
+                            // running 任务才吃 nowSec;其余行传 0 —— props 不变,memo 就能拦下每秒 tick
+                            // 带来的整表重渲染,只让在跑的那几行走时长。
+                            nowSec={task.status === "running" ? nowSec : 0}
+                            onDelete={deleteTask}
+                            onControl={controlTask}
+                            onRerun={rerunTask}
+                            onRename={renameTask}
+                            onTogglePinned={toggleTaskPinned}
+                            onArchive={queueTaskArchive}
+                            selected={selectedIds.has(task.id)}
+                            onSelectedChange={toggleSelected}
+                            onOpenDetail={detail.openDetail}
+                          />
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                  <TablePagination
+                    page={page}
+                    pageSize={pageSize}
+                    total={filtered.length}
+                    onPageChange={setPage}
+                    onPageSizeChange={(nextPageSize) => {
+                      setPageSize(nextPageSize);
+                      setPage(1);
+                    }}
                   />
-                  <BulkDeleteTasksDialog ids={[...selectedIds]} onDelete={deleteTasks} />
-                </>
-              )}
-              <ConcurrencySettingsDialog />
-              <CategoryManagementSheet
-                categories={categories}
-                tasks={tasks}
-                onChanged={refreshCategoriesAndTasks}
-                onTaskMoved={applyTaskCategoryMove}
-              />
-              <CreateTaskSheet
-                tasks={tasks}
-                categories={categories}
-                onCreated={refreshCategoriesAndTasks}
-                onCategoriesChanged={refreshCategoriesAndTasks}
-              />
-            </div>
-
-            {tasks.length === 0 ? (
-              <div className="text-muted-foreground mx-4 flex items-center justify-center rounded-lg border border-dashed py-20 text-sm lg:mx-6">
-                {t("empty.noTasks")}
-              </div>
-            ) : filtered.length === 0 ? (
-              <div className="text-muted-foreground mx-4 flex items-center justify-center rounded-lg border border-dashed py-20 text-sm lg:mx-6">
-                {t("empty.noMatch")}
-              </div>
-            ) : (
-              /* 通过 @container 响应表格所占的“正文”宽度（而非视口）。
-                 侧边栏展开时，即使是同一视口，正文也会变窄，因此以视口为基准
-                 响应式下在中等宽度时列会重叠。宽度变窄时，低优先级的列
-                 从(说明·目标进度·Worker·创建/执行时间·Token)开始隐藏，固定的「动作」
-                 使列不会重叠在其他列之上执行。 */
-              <div className="@container">
-                <Table className="**:data-[slot='table-cell']:px-4 **:data-[slot='table-head']:px-4">
-                  <TableHeader className="[&_tr]:border-t">
-                    <TableRow>
-                      <TableHead className="w-10">
-                        <Checkbox
-                          checked={headerChecked}
-                          onCheckedChange={(checked) => toggleSelectedPage(checked === true)}
-                          aria-label={t("table.selectAllAria")}
-                        />
-                      </TableHead>
-                      <SortableTaskHead
-                        field="id"
-                        label="ID"
-                        activeField={sortField}
-                        direction={sortDirection}
-                        className="font-mono"
-                        onSort={sortTasksBy}
-                      />
-                      <TableHead>{t("table.name")}</TableHead>
-                      <TableHead className="hidden @5xl:table-cell">{t("table.description")}</TableHead>
-                      <TableHead>{t("table.target")}</TableHead>
-                      <SortableTaskHead
-                        field="status"
-                        label={t("table.status")}
-                        activeField={sortField}
-                        direction={sortDirection}
-                        onSort={sortTasksBy}
-                      />
-                      <TableHead className="hidden text-center @3xl:table-cell">{t("table.goalProgress")}</TableHead>
-                      <TableHead className="text-center" title={t("table.findingsTitle")}>
-                        {t("table.findings")}{" "}
-                        <span className="text-muted-foreground font-normal">{t("table.findingsSub")}</span>
-                      </TableHead>
-                      <TableHead className="hidden text-center @4xl:table-cell">{t("table.runningWorker")}</TableHead>
-                      <SortableTaskHead
-                        field="created"
-                        label={t("table.created")}
-                        activeField={sortField}
-                        direction={sortDirection}
-                        align="right"
-                        className="hidden @6xl:table-cell"
-                        onSort={sortTasksBy}
-                      />
-                      <SortableTaskHead
-                        field="duration"
-                        label={t("table.duration")}
-                        activeField={sortField}
-                        direction={sortDirection}
-                        align="right"
-                        className="hidden @6xl:table-cell"
-                        onSort={sortTasksBy}
-                      />
-                      <TableHead className="hidden text-right @7xl:table-cell">Token</TableHead>
-                      <TableHead className="text-right">{t("table.actions")}</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {paginated.map((task) => (
-                      <TaskRow
-                        key={task.id}
-                        task={task}
-                        // running 任务才吃 nowSec;其余行传 0 —— props 不变,memo 就能拦下每秒 tick
-                        // 带来的整表重渲染,只让在跑的那几行走时长。
-                        nowSec={task.status === "running" ? nowSec : 0}
-                        onDelete={deleteTask}
-                        onControl={controlTask}
-                        onRerun={rerunTask}
-                        onRename={renameTask}
-                        onTogglePinned={toggleTaskPinned}
-                        onArchive={queueTaskArchive}
-                        selected={selectedIds.has(task.id)}
-                        onSelectedChange={toggleSelected}
-                        onOpenDetail={detail.openDetail}
-                      />
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-            <TablePagination
-              page={page}
-              pageSize={pageSize}
-              total={filtered.length}
-              onPageChange={setPage}
-              onPageSizeChange={(nextPageSize) => {
-                setPageSize(nextPageSize);
-                setPage(1);
-              }}
-            />
-          </CardContent>
-        </Card>
-      </TabsContent>
-      <TabsContent value="archived">
-        <TaskArchivesPanel onChanged={load} />
-      </TabsContent>
+                </CardContent>
+              </Card>
+            </TabsContent>
+            <TabsContent value="archived">
+              <TaskArchivesPanel onChanged={load} />
+            </TabsContent>
+          </StateBoundary>
+        </div>
+      </PageShell>
       {/* 右侧详情抽屉：URL 带 ?id= 就打开，刷新还原、链接可分享、后退即关 */}
       <TaskDrawer id={detail.id} open={detail.open} onClose={detail.closeDetail} />
     </Tabs>
@@ -1273,7 +1336,7 @@ const TaskRow = React.memo(function TaskRow({
       <TableCell className="font-medium">
         <div className="flex max-w-xs items-center gap-2">
           <TaskNameEditor task={task} onRename={onRename} onOpenDetail={onOpenDetail} />
-          {task.active && <StarIcon className="size-4 shrink-0 fill-amber-400 text-amber-700 dark:text-amber-400" />}
+          {task.active && <StarIcon className="size-4 shrink-0 fill-primary/30 text-primary" />}
           {taskIsPinned(task) && <PinIcon className="text-primary size-4 shrink-0" aria-label={t("row.pinnedBadge")} />}
         </div>
       </TableCell>

@@ -16,6 +16,9 @@ import {
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
+import { StateBoundary } from "@/components/data/state-boundary";
+import { PageShell } from "@/components/shell/page-shell";
+import { Toolbar } from "@/components/shell/toolbar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -23,8 +26,10 @@ import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { usePermissionDenied } from "@/hooks/use-permission-denied";
 import { getDateLocale } from "@/i18n/datetime";
 import { api } from "@/lib/api";
+import { errorCodeOf } from "@/lib/api-error";
 import type { WorkspaceEntry, WorkspaceFile } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -53,6 +58,11 @@ type EditState = {
 
 export default function WorkspacePage() {
   const t = useTranslations("workspace");
+  const tn = useTranslations("nav");
+  const tps = useTranslations("pageStates");
+  const perm = usePermissionDenied();
+  const lastError = React.useRef<unknown>(null);
+  const [error, setError] = React.useState<string | null>(null);
   const [path, setPath] = React.useState("");
   const [entries, setEntries] = React.useState<WorkspaceEntry[]>([]);
   const [loading, setLoading] = React.useState(true);
@@ -69,8 +79,16 @@ export default function WorkspacePage() {
         .then((r) => {
           setEntries(r.entries);
           setPath(r.path);
+          setError(null);
+          lastError.current = null;
+          perm.reset();
         })
-        .catch((e) => toast.error(t("readDirFailed", { msg: (e as Error).message })))
+        .catch((e) => {
+          lastError.current = e;
+          perm.check(e);
+          setError((e as Error).message);
+          toast.error(t("readDirFailed", { msg: (e as Error).message }));
+        })
         .finally(() => setLoading(false));
     },
     [t],
@@ -155,10 +173,13 @@ export default function WorkspacePage() {
   };
 
   return (
-    <div className="flex flex-col gap-4">
-      {/* 头部：路径（面包屑）+ 操作 */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-1 text-sm">
+    <PageShell
+      title={tn("item.workspace")}
+      breadcrumb={[{ label: tn("group.target"), href: "/dashboard" }, { label: tn("item.workspace") }]}
+      toolbar={
+        <Toolbar
+          filters={
+            <div className="flex min-w-0 flex-wrap items-center gap-1 text-sm">
           <HardDriveIcon className="text-muted-foreground mr-1 size-4 shrink-0" />
           {crumbs.map((c, i) => (
             <React.Fragment key={c.path}>
@@ -175,8 +196,10 @@ export default function WorkspacePage() {
               </button>
             </React.Fragment>
           ))}
-        </div>
-        <div className="flex items-center gap-2">
+            </div>
+          }
+          viewSwitch={
+            <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => setMkdirOpen(true)}>
             <FolderPlusIcon /> {t("newFolder")}
           </Button>
@@ -187,9 +210,43 @@ export default function WorkspacePage() {
             <RefreshCwIcon className={cn("size-4", loading && "animate-spin")} />
           </Button>
           <input ref={uploadRef} type="file" multiple className="hidden" onChange={(e) => doUpload(e.target.files)} />
-        </div>
-      </div>
-
+            </div>
+          }
+        />
+      }
+    >
+      <div className="px-4 py-3 md:px-6">
+        <StateBoundary
+          className="flex min-h-0 flex-col"
+          loading={loading && entries.length === 0}
+          error={
+            error
+              ? {
+                  title: tps("errorTitle"),
+                  detail: tps("errorDetail"),
+                  code: errorCodeOf(lastError.current),
+                  codeLabel: tps("errorCodeLabel"),
+                  retryLabel: tps("retry"),
+                }
+              : null
+          }
+          permission={perm.denied ? "workspace:read" : null}
+          permissionProps={{
+            title: tps("permissionTitle"),
+            detail: tps("permissionDetail", { name: tn("item.workspace"), ask: tps("askAdmin") }),
+            missingLabel: tps("permissionMissing"),
+            askLabel: tps("permissionAsk"),
+            ask: tps("askAdmin"),
+          }}
+          empty={!loading && !error && entries.length === 0}
+          emptyProps={{ title: tps("emptyTitle"), reason: tps("empty.workspace") }}
+          onRetry={() => {
+            setError(null);
+            lastError.current = null;
+            perm.reset();
+            load(path);
+          }}
+        >
       <Card>
         <CardContent className="p-0">
           <Table>
@@ -202,13 +259,6 @@ export default function WorkspacePage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {entries.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={4} className="text-muted-foreground py-10 text-center text-sm">
-                    {loading ? t("loading") : t("empty")}
-                  </TableCell>
-                </TableRow>
-              )}
               {entries.map((e) => (
                 <TableRow key={e.path}>
                   <TableCell>
@@ -218,7 +268,7 @@ export default function WorkspacePage() {
                       className="flex items-center gap-2 text-left hover:underline"
                     >
                       {e.dir ? (
-                        <FolderIcon className="size-4 shrink-0 text-blue-700 dark:text-blue-500" />
+                        <FolderIcon className="text-primary size-4 shrink-0" />
                       ) : (
                         <FileIcon className="text-muted-foreground size-4 shrink-0" />
                       )}
@@ -263,6 +313,7 @@ export default function WorkspacePage() {
           </Table>
         </CardContent>
       </Card>
+        </StateBoundary>
 
       {/* 文件查看 / 编辑 */}
       <Sheet open={edit !== null} onOpenChange={(o) => !o && setEdit(null)}>
@@ -337,6 +388,7 @@ export default function WorkspacePage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+      </div>
+    </PageShell>
   );
 }

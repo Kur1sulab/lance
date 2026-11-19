@@ -6,6 +6,8 @@ import { AlertCircleIcon, CheckCircle2Icon, DownloadIcon, PlugZapIcon, RefreshCw
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
+import { StateBoundary } from "@/components/data/state-boundary";
+import { PageShell } from "@/components/shell/page-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,7 +16,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { usePermissionDenied } from "@/hooks/use-permission-denied";
 import { api } from "@/lib/api";
+import { errorCodeOf } from "@/lib/api-error";
 import type { SSProject, SSTask } from "@/lib/types";
 
 type SSStatus = {
@@ -32,35 +36,53 @@ const ASSET_TYPES: string[] = ["subdomain", "service", "app"];
 
 export default function AssetSyncPage() {
   const t = useTranslations("assetSync");
+  const tn = useTranslations("nav");
   return (
-    <div className="p-4 md:p-6">
-      <div className="mb-4">
-        <h1 className="font-semibold text-xl">{t("title")}</h1>
-        <p className="text-muted-foreground text-sm">{t("subtitle")}</p>
+    <PageShell
+      title={t("title")}
+      description={t("subtitle")}
+      breadcrumb={[{ label: tn("group.target"), href: "/dashboard" }, { label: tn("item.sync") }]}
+    >
+      <div className="px-4 py-3 md:px-6">
+        <Tabs defaultValue="scopesentry">
+          <TabsList>
+            <TabsTrigger value="scopesentry">ScopeSentry</TabsTrigger>
+          </TabsList>
+          <TabsContent value="scopesentry" className="mt-4">
+            <ScopeSentryPanel />
+          </TabsContent>
+        </Tabs>
       </div>
-      <Tabs defaultValue="scopesentry">
-        <TabsList>
-          <TabsTrigger value="scopesentry">ScopeSentry</TabsTrigger>
-        </TabsList>
-        <TabsContent value="scopesentry" className="mt-4">
-          <ScopeSentryPanel />
-        </TabsContent>
-      </Tabs>
-    </div>
+    </PageShell>
   );
 }
 
 function ScopeSentryPanel() {
   const t = useTranslations("assetSync");
+  const tn = useTranslations("nav");
+  const tps = useTranslations("pageStates");
+  const perm = usePermissionDenied();
+  const lastError = React.useRef<unknown>(null);
   const [status, setStatus] = React.useState<SSStatus | null>(null);
   const [loadingStatus, setLoadingStatus] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
 
   const loadStatus = React.useCallback(() => {
     setLoadingStatus(true);
     api
       .ssStatus()
-      .then(setStatus)
-      .catch((e) => toast.error(t("statusLoadFailed", { msg: e.message })))
+      .then((s) => {
+        setStatus(s);
+        setError(null);
+        lastError.current = null;
+        perm.reset();
+      })
+      .catch((e) => {
+        lastError.current = e;
+        perm.check(e);
+        setError(e.message);
+        toast.error(t("statusLoadFailed", { msg: e.message }));
+      })
       .finally(() => setLoadingStatus(false));
   }, [t]);
 
@@ -71,16 +93,40 @@ function ScopeSentryPanel() {
   const ready = !!status && status.exists && status.configured && status.enabled;
 
   return (
-    <div className="space-y-4">
-      <DataSourceCard status={status} loading={loadingStatus} onChanged={loadStatus} />
-      {ready ? (
-        <SyncWorkbench />
-      ) : (
-        <Card>
-          <CardContent className="py-8 text-center text-muted-foreground text-sm">{t("notReady")}</CardContent>
-        </Card>
-      )}
-    </div>
+    <StateBoundary
+      loading={loadingStatus && !status}
+      error={
+        error
+          ? {
+              title: tps("errorTitle"),
+              detail: tps("errorDetail"),
+              code: errorCodeOf(lastError.current),
+              codeLabel: tps("errorCodeLabel"),
+              retryLabel: tps("retry"),
+            }
+          : null
+      }
+      permission={perm.denied ? "sync:read" : null}
+      permissionProps={{
+        title: tps("permissionTitle"),
+        detail: tps("permissionDetail", { name: tn("item.sync"), ask: tps("askAdmin") }),
+        missingLabel: tps("permissionMissing"),
+        askLabel: tps("permissionAsk"),
+        ask: tps("askAdmin"),
+      }}
+      onRetry={loadStatus}
+    >
+      <div className="space-y-4">
+        <DataSourceCard status={status} loading={loadingStatus} onChanged={loadStatus} />
+        {ready ? (
+          <SyncWorkbench />
+        ) : (
+          <Card>
+            <CardContent className="py-8 text-center text-muted-foreground text-sm">{t("notReady")}</CardContent>
+          </Card>
+        )}
+      </div>
+    </StateBoundary>
   );
 }
 
@@ -153,9 +199,9 @@ function DataSourceCard({
           </div>
         ) : (
           <>
-            {!status.configured && <p className="text-amber-600 text-sm dark:text-amber-500">{t("notConfigured")}</p>}
+            {!status.configured && <p className="text-muted-foreground text-sm">{t("notConfigured")}</p>}
             {status.configured && !status.enabled && (
-              <p className="text-amber-600 text-sm dark:text-amber-500">{t("notEnabled")}</p>
+              <p className="text-muted-foreground text-sm">{t("notEnabled")}</p>
             )}
             <div className="grid gap-3 md:grid-cols-2">
               <div className="space-y-1.5">
@@ -195,7 +241,7 @@ function StatusBadge({ status, loading }: { status: SSStatus | null; loading: bo
   if (!status.enabled) return <Badge variant="outline">{t("badgeNotEnabled")}</Badge>;
   if (status.reachable)
     return (
-      <Badge className="bg-emerald-600 hover:bg-emerald-600">
+      <Badge variant="secondary">
         <CheckCircle2Icon className="mr-1 size-3" /> {t("badgeConnected")}
       </Badge>
     );
@@ -211,6 +257,10 @@ function StatusBadge({ status, loading }: { status: SSStatus | null; loading: bo
 function SyncWorkbench() {
   const t = useTranslations("assetSync");
   const tp = useTranslations("pagination");
+  const tps = useTranslations("pageStates");
+  const permWB = usePermissionDenied();
+  const lastErrorWB = React.useRef<unknown>(null);
+  const [errorWB, setErrorWB] = React.useState<string | null>(null);
   const [dimension, setDimension] = React.useState<Dimension>("project");
   const [assetTypes, setAssetTypes] = React.useState<Record<string, boolean>>({
     subdomain: true,
@@ -234,9 +284,24 @@ function SyncWorkbench() {
     setSelected(new Set());
     const fn =
       dimension === "project"
-        ? api.ssProjects(page, 50, search).then((r) => setProjects(r.projects))
-        : api.ssTasks(page, 50, search).then(setTasks);
-    fn.catch((e) => toast.error(t("listLoadFailed", { msg: e.message }))).finally(() => setLoading(false));
+        ? api.ssProjects(page, 50, search).then((r) => {
+            setProjects(r.projects);
+            setErrorWB(null);
+            lastErrorWB.current = null;
+            permWB.reset();
+          })
+        : api.ssTasks(page, 50, search).then((r) => {
+            setTasks(r);
+            setErrorWB(null);
+            lastErrorWB.current = null;
+            permWB.reset();
+          });
+    fn.catch((e) => {
+      lastErrorWB.current = e;
+      permWB.check(e);
+      setErrorWB(e.message);
+      toast.error(t("listLoadFailed", { msg: e.message }));
+    }).finally(() => setLoading(false));
   }, [dimension, page, search, t]);
 
   React.useEffect(() => {
@@ -283,24 +348,6 @@ function SyncWorkbench() {
   };
 
   const renderRows = () => {
-    if (loading) {
-      return (
-        <TableRow>
-          <TableCell colSpan={4} className="py-8 text-center text-muted-foreground text-sm">
-            {t("loading")}
-          </TableCell>
-        </TableRow>
-      );
-    }
-    if (rows.length === 0) {
-      return (
-        <TableRow>
-          <TableCell colSpan={4} className="py-8 text-center text-muted-foreground text-sm">
-            {t("noData")}
-          </TableCell>
-        </TableRow>
-      );
-    }
     if (dimension === "project") {
       return projects.map((p) => (
         <TableRow key={p.id} className="cursor-pointer" onClick={() => toggle(p.id)}>
@@ -398,6 +445,29 @@ function SyncWorkbench() {
         </div>
 
         {/* 列表 */}
+        <StateBoundary
+          loading={loading && rows.length === 0}
+          error={
+            errorWB
+              ? {
+                  title: tps("errorTitle"),
+                  detail: tps("errorDetail"),
+                  code: errorCodeOf(lastErrorWB.current),
+                  codeLabel: tps("errorCodeLabel"),
+                  retryLabel: tps("retry"),
+                }
+              : null
+          }
+          permission={permWB.denied ? "sync:read" : null}
+          empty={!loading && !errorWB && rows.length === 0}
+          emptyProps={{ title: tps("emptyTitle"), reason: tps("empty.sync") }}
+          onRetry={() => {
+            setErrorWB(null);
+            lastErrorWB.current = null;
+            permWB.reset();
+            load();
+          }}
+        >
         <div className="rounded-md border">
           <Table>
             <TableHeader>
@@ -422,6 +492,7 @@ function SyncWorkbench() {
             <TableBody>{renderRows()}</TableBody>
           </Table>
         </div>
+        </StateBoundary>
 
         {/* 分页 */}
         <div className="flex items-center justify-end gap-2">
@@ -462,7 +533,7 @@ function SyncResult({ result }: { result: Awaited<ReturnType<typeof api.ssSync>>
         <p className="text-muted-foreground">{t("resultCompanies", { names: result.companies.join(", ") })}</p>
       )}
       {result.warnings && result.warnings.length > 0 && (
-        <ul className="list-inside list-disc text-amber-600 dark:text-amber-500">
+        <ul className="text-muted-foreground list-inside list-disc">
           {result.warnings.map((wm) => (
             <li key={wm}>{wm}</li>
           ))}

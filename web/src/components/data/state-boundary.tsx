@@ -13,8 +13,30 @@ import { SkeletonTable } from "./skeleton-table";
 
 export interface StateBoundaryProps {
   loading?: boolean;
-  error?: { title?: string; detail?: string; code?: string | number } | null;
-  /** true = 无数据。无权限请用 PermissionState，不要伪装成 empty。 */
+  error?: {
+    title?: string;
+    detail?: string;
+    code?: string | number;
+    /** 「错误码」标签与重试按钮文案，由调用方传 i18n 结果 */
+    codeLabel?: string;
+    retryLabel?: string;
+  } | null;
+  /**
+   * 无权限的权限标识（如 `findings:read`）。非空即渲染无权限态。
+   * 优先级在 loading 之后、error 之前——403 不是「请求失败」，是「你没这个权力」。
+   */
+  permission?: string | null;
+  permissionProps?: {
+    title?: string;
+    detail?: string;
+    ask?: string;
+    /** 「缺少权限」标签文案（i18n 由调用方给） */
+    missingLabel?: string;
+    /** 「找」标签文案（i18n 由调用方给） */
+    askLabel?: string;
+    action?: ReactNode;
+  };
+  /** true = 无数据。无权限请用 permission，不要伪装成 empty。 */
   empty?: boolean;
   emptyProps?: {
     title?: string;
@@ -30,11 +52,13 @@ export interface StateBoundaryProps {
 }
 
 /**
- * 优先级：loading → error → empty → children（设计文档 §五）。
+ * 优先级：loading → permission → error → empty → children（设计文档 §五）。
  */
 export function StateBoundary({
   loading = false,
   error = null,
+  permission = null,
+  permissionProps,
   empty = false,
   emptyProps,
   skeleton,
@@ -52,6 +76,22 @@ export function StateBoundary({
     );
   }
 
+  if (permission) {
+    return (
+      <div data-slot="state-permission" className={cn("w-full", className)}>
+        <PermissionState
+          permission={permission}
+          ask={permissionProps?.ask}
+          title={permissionProps?.title}
+          detail={permissionProps?.detail}
+          missingLabel={permissionProps?.missingLabel}
+          askLabel={permissionProps?.askLabel}
+          action={permissionProps?.action}
+        />
+      </div>
+    );
+  }
+
   if (error) {
     return (
       <div data-slot="state-error" className={cn("w-full", className)}>
@@ -59,6 +99,8 @@ export function StateBoundary({
           title={error.title ?? "数据加载失败"}
           detail={error.detail}
           code={error.code}
+          codeLabel={error.codeLabel}
+          retryLabel={error.retryLabel}
           onRetry={onRetry}
         />
       </div>
@@ -90,6 +132,10 @@ export interface PermissionStateProps {
   ask?: string;
   title?: string;
   detail?: string;
+  /** 「缺少权限」标签；调用方传 i18n 文案 */
+  missingLabel?: string;
+  /** 「找」标签；调用方传 i18n 文案 */
+  askLabel?: string;
   className?: string;
   action?: ReactNode;
 }
@@ -102,6 +148,8 @@ export function PermissionState({
   ask = "平台管理员",
   title = "没有查看权限",
   detail,
+  missingLabel = "缺少权限",
+  askLabel = "找",
   className,
   action,
 }: PermissionStateProps) {
@@ -122,11 +170,11 @@ export function PermissionState({
         {detail ?? `你的账号缺少查看此处数据所需的权限，请联系${ask}申请开通。`}
       </p>
       <div className="flex flex-wrap items-center justify-center gap-2 text-[11px] text-muted-foreground">
-        <span>缺少权限</span>
+        <span>{missingLabel}</span>
         <code className="rounded-sm border border-border px-1.5 py-0.5 font-mono text-foreground">
           {permission}
         </code>
-        <span>找</span>
+        <span>{askLabel}</span>
         <span className="text-foreground">{ask}</span>
       </div>
       {action ? <div className="mt-1">{action}</div> : null}
@@ -135,10 +183,16 @@ export function PermissionState({
 }
 
 /** 便捷导出：无权限时的重试/申请按钮 */
-export function PermissionStateAction({ onClick }: { onClick?: () => void }) {
+export function PermissionStateAction({
+  onClick,
+  label = "申请权限",
+}: {
+  onClick?: () => void;
+  label?: string;
+}) {
   return (
     <Button size="sm" variant="outline" onClick={onClick}>
-      申请权限
+      {label}
     </Button>
   );
 }

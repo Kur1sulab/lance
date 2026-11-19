@@ -18,8 +18,11 @@ import {
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
+import { StateBoundary } from "@/components/data/state-boundary";
 import { FindingDrawer } from "@/components/domain/finding-drawer";
 import { FindingRetestDialog } from "@/components/finding-retest-dialog";
+import { PageShell } from "@/components/shell/page-shell";
+import { Toolbar } from "@/components/shell/toolbar";
 import { StatusBadge } from "@/components/status-badge";
 import { TablePagination } from "@/components/table-pagination";
 import { Button } from "@/components/ui/button";
@@ -41,7 +44,9 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useDetailParam } from "@/hooks/use-detail-param";
+import { usePermissionDenied } from "@/hooks/use-permission-denied";
 import { api } from "@/lib/api";
+import { errorCodeOf } from "@/lib/api-error";
 import { getLocalStorageValue, setLocalStorageValue } from "@/lib/local-storage.client";
 import type {
   ActiveFindingRetest,
@@ -132,6 +137,13 @@ const EMPTY_STATS: FindingStats = {
 
 function FindingsPageInner() {
   const t = useTranslations("findings");
+  const tn = useTranslations("nav");
+  const tp = useTranslations("pageStates");
+  const perm = usePermissionDenied();
+  const permCheck = perm.check;
+  const lastError = React.useRef<unknown>(null);
+  // 取数失败要用 state 触发重渲染（ref 不会），错误码仍从 lastError 取。
+  const [loadFailed, setLoadFailed] = React.useState(false);
   // 详情抽屉：?id= 与 URL 双向同步（设计文档 §四）
   const detail = useDetailParam();
   const tStatus = useTranslations("status");
@@ -151,6 +163,8 @@ function FindingsPageInner() {
   const [assetScope, setAssetScope] = React.useState<string | null>(null);
   const [groups, setGroups] = React.useState<FindingGroup[]>([]);
   const [groupTotal, setGroupTotal] = React.useState(0);
+  // 分组视图的「首帧」标记：只在 groups 首次取数成功后置位（loading 语义用）。
+  const [groupsLoaded, setGroupsLoaded] = React.useState(false);
   const [expandedGroups, setExpandedGroups] = React.useState<Set<string>>(() => new Set());
   const [groupFindings, setGroupFindings] = React.useState<Record<string, GroupFindingsState>>({});
   const [total, setTotal] = React.useState(0);
@@ -340,8 +354,12 @@ function FindingsPageInner() {
       });
       if (request !== flatRequest.current || activeFilterFingerprint.current !== requestFilter) return;
       setFlat({ items: result.items, total: result.total, loaded: true, loading: false });
-    } catch {
+      setLoadFailed(false);
+    } catch (e) {
       if (request !== flatRequest.current || activeFilterFingerprint.current !== requestFilter) return;
+      lastError.current = e;
+      permCheck(e);
+      setLoadFailed(true);
       // Polling keeps the last successful snapshot visible.
       setFlat((current) => ({ ...current, loading: false }));
     }
@@ -365,8 +383,12 @@ function FindingsPageInner() {
         loaded: true,
         loading: false,
       });
+      setLoadFailed(false);
     } catch (e) {
       if (request !== assetTreeRequest.current || activeFilterFingerprint.current !== requestFilter) return;
+      lastError.current = e;
+      permCheck(e);
+      setLoadFailed(true);
       setAssetTree((current) => ({ ...current, loading: false }));
       toast.error(t("toast.assetTreeFailed", { error: (e as Error).message }));
     }
@@ -391,8 +413,13 @@ function FindingsPageInner() {
       setGroups(result.items);
       setGroupTotal(result.total);
       setTotal(result.finding_total);
-    } catch {
+      setGroupsLoaded(true);
+      setLoadFailed(false);
+    } catch (e) {
       // Polling keeps the last successful snapshot visible.
+      lastError.current = e;
+      permCheck(e);
+      setLoadFailed(true);
     }
   }, [filterFingerprint, page, pageSize, severity, status, vulnclass, task, query, sort]);
 
@@ -759,11 +786,16 @@ function FindingsPageInner() {
 
   const statCards = [
     { label: t("stat.total"), value: stats.total, icon: BugIcon },
-    { label: t("stat.pending"), value: stats.pending, tone: "text-amber-700 dark:text-amber-500", icon: ClockIcon },
-    { label: t("severity.critical"), value: stats.critical, tone: "text-rose-600", icon: ShieldAlertIcon },
-    { label: t("severity.high"), value: stats.high, tone: "text-red-700 dark:text-red-500", icon: TriangleAlertIcon },
-    { label: t("severity.medium"), value: stats.medium, tone: "text-amber-700 dark:text-amber-500", icon: TriangleAlertIcon },
-    { label: t("severity.low"), value: stats.low, tone: "text-slate-500", icon: InfoIcon },
+    { label: t("stat.pending"), value: stats.pending, tone: "text-muted-foreground", icon: ClockIcon },
+    { label: t("severity.critical"), value: stats.critical, tone: "text-destructive", icon: ShieldAlertIcon },
+    { label: t("severity.high"), value: stats.high, tone: "text-destructive", icon: TriangleAlertIcon },
+    {
+      label: t("severity.medium"),
+      value: stats.medium,
+      tone: "text-foreground",
+      icon: TriangleAlertIcon,
+    },
+    { label: t("severity.low"), value: stats.low, tone: "text-muted-foreground", icon: InfoIcon },
   ];
 
   // 导出弹窗里「当前筛选」的条数:两个视图的筛选一致,只是统计口径来源不同。
@@ -821,323 +853,379 @@ function FindingsPageInner() {
     </Card>
   );
 
+  // 四态判定：loading 取「当前视图首帧是否已到」，空态只认「取数成功且没有数据」。
+  const viewLoading =
+    !preferencesHydrated ||
+    (view === "grouped"
+      ? !groupsLoaded && !loadFailed
+      : view === "asset"
+        ? assetTree.loading && !assetTree.loaded
+        : flat.loading && !flat.loaded);
+  const viewFirstLoadFailed =
+    loadFailed &&
+    !perm.denied &&
+    (view === "grouped" ? !groupsLoaded : view === "asset" ? !assetTree.loaded : !flat.loaded);
+  const viewEmpty = view === "grouped" ? groupsLoaded && groups.length === 0 : flat.loaded && flat.items.length === 0;
+  const retryCurrentView = () => {
+    lastError.current = null;
+    setLoadFailed(false);
+    if (view === "grouped") void refreshGroups();
+    else if (view === "asset") {
+      void loadAssetTree();
+      void loadFlat();
+    } else {
+      void loadFlat();
+    }
+  };
+
   return (
-    <div className="flex flex-1 flex-col gap-4 md:gap-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">{t("title")}</h1>
-          <p className="text-muted-foreground text-sm">{t("subtitle")}</p>
-        </div>
-        <Tabs value={view} onValueChange={(v) => setView(v as FindingView)}>
-          <TabsList>
-            <TabsTrigger value="flat">{t("view.flat")}</TabsTrigger>
-            <TabsTrigger value="grouped">{t("view.grouped")}</TabsTrigger>
-            <TabsTrigger value="asset">{t("view.asset")}</TabsTrigger>
-          </TabsList>
-        </Tabs>
-      </div>
-      <div className="flex flex-1 flex-col gap-4 md:gap-6">
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
-          {statCards.map((stat) => {
-            const StatIcon = stat.icon;
-            return (
-              <Card key={stat.label} className="gap-1 py-4">
-                <CardHeader className="px-4">
-                  <CardDescription>{stat.label}</CardDescription>
-                  <CardTitle className={cn("flex items-center gap-2 text-2xl tabular-nums", stat.tone)}>
-                    <StatIcon className="size-5" aria-hidden="true" />
-                    {stat.value}
-                  </CardTitle>
-                </CardHeader>
-              </Card>
-            );
-          })}
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <InputGroup className="w-full sm:w-72">
-            <InputGroupInput
-              type="search"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder={t("search.placeholder")}
-              aria-label={t("search.placeholder")}
-            />
-            <InputGroupAddon>
-              <SearchIcon aria-hidden="true" />
-            </InputGroupAddon>
-          </InputGroup>
-
-          <ToggleGroup
-            type="single"
-            value={severity}
-            onValueChange={(value) => value && setSeverity(value as "all" | Severity)}
-            variant="outline"
-            size="sm"
-            spacing={0}
-          >
-            {(
-              [
-                ["all", t("severity.all")],
-                ["critical", t("severity.critical")],
-                ["high", t("severity.high")],
-                ["medium", t("severity.medium")],
-                ["low", t("severity.low")],
-              ] as const
-            ).map(([val, label]) => (
-              <ToggleGroupItem key={val} value={val} aria-label={t("severity.ariaFilter", { label })}>
-                {label}
-              </ToggleGroupItem>
-            ))}
-          </ToggleGroup>
-
-          <Select value={status} onValueChange={(v) => setStatus(v as "all" | FindingStatus)}>
-            <SelectTrigger size="sm" className="w-32">
-              <SelectValue placeholder={t("status.placeholder")} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">{t("status.all")}</SelectItem>
-              {FINDING_STATUSES.map((st) => (
-                <SelectItem key={st} value={st}>
-                  {tStatus(`finding.${st}`)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <Select value={vulnclass} onValueChange={setVulnclass}>
-            <SelectTrigger size="sm" className="w-40">
-              <SelectValue placeholder={t("vulnclass.placeholder")} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">{t("vulnclass.all")}</SelectItem>
-              {stats.vulnclasses.map((vc) => (
-                <SelectItem key={vc} value={vc}>
-                  {vc}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <Select value={task} onValueChange={setTask}>
-            <SelectTrigger size="sm" className="w-48">
-              <SelectValue placeholder={t("task.placeholder")} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">{t("task.all")}</SelectItem>
-              <SelectItem value={UNASSIGNED_TASK}>{t("task.unassigned")}</SelectItem>
-              {(stats.tasks ?? []).map((taskOpt) => {
-                const id = String(taskOpt.id);
-                const label = taskOpt.name || taskOpt.description || t("task.deletedShort", { id });
-                return (
-                  <SelectItem key={id} value={id}>
-                    <span className="flex w-full items-center gap-2">
-                      <span className="max-w-[14rem] truncate" title={label}>
-                        {label}
-                      </span>
-                      <span className="inline-flex items-center gap-1 text-muted-foreground tabular-nums">
-                        <BugIcon className="size-3.5" aria-hidden="true" />
-                        {taskOpt.count}
-                      </span>
-                    </span>
-                  </SelectItem>
-                );
-              })}
-            </SelectContent>
-          </Select>
-
-          <Select value={sort} onValueChange={(v) => setSort(v as "severity" | "time")}>
-            <SelectTrigger size="sm" className="w-36">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="severity">{t("sort.severity")}</SelectItem>
-              <SelectItem value="time">{t("sort.time")}</SelectItem>
-            </SelectContent>
-          </Select>
-
-          <div className="ml-auto flex items-center gap-3">
-            {selectedIds.size > 0 && (
-              <span className="text-xs text-muted-foreground tabular-nums">
-                {t("selectedCount", { count: selectedIds.size })}
-              </span>
-            )}
-            <Button size="sm" variant="outline" onClick={openExport}>
-              <DownloadIcon /> {t("export")}
-            </Button>
-          </div>
-        </div>
-
-        {view === "flat" && flatListCard}
-
-        {view === "asset" && (
-          <div className="grid min-h-0 items-start gap-4 lg:grid-cols-[20rem_minmax(0,1fr)] xl:grid-cols-[24rem_minmax(0,1fr)]">
-            <Card className="gap-0 py-3 lg:sticky lg:top-4">
-              <CardContent className="flex flex-col px-3">
-                {assetTree.loading && !assetTree.loaded ? (
-                  <div className="flex min-h-36 items-center justify-center">
-                    <Spinner />
-                  </div>
-                ) : (
-                  <AssetTree
-                    nodes={assetTree.nodes}
-                    selected={assetScope}
-                    onSelect={setAssetScope}
-                    loading={assetTree.loading}
-                    truncated={assetTree.truncated}
-                    droppedKinds={assetTree.droppedKinds}
-                    findingTotal={assetTree.findingTotal}
-                    onRefresh={() => void loadAssetTree()}
-                  />
-                )}
-              </CardContent>
-            </Card>
-            <div className="flex min-w-0 flex-col gap-2">
-              <div className="flex min-w-0 flex-wrap items-center gap-1 text-sm text-muted-foreground">
-                <button
-                  type="button"
-                  className={cn("hover:text-foreground", assetScope === null && "font-medium text-foreground")}
-                  onClick={() => setAssetScope(null)}
+    <>
+      <PageShell
+        title={t("title")}
+        description={t("subtitle")}
+        breadcrumb={[{ label: tn("group.war"), href: "/dashboard" }, { label: tn("item.findings") }]}
+        toolbar={
+          <Toolbar
+            search={
+              <InputGroup className="w-full">
+                <InputGroupInput
+                  type="search"
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder={t("search.placeholder")}
+                  aria-label={t("search.placeholder")}
+                />
+                <InputGroupAddon>
+                  <SearchIcon aria-hidden="true" />
+                </InputGroupAddon>
+              </InputGroup>
+            }
+            filters={
+              <>
+                <ToggleGroup
+                  type="single"
+                  value={severity}
+                  onValueChange={(value) => value && setSeverity(value as "all" | Severity)}
+                  variant="outline"
+                  size="sm"
+                  spacing={0}
                 >
-                  {t("asset.all")}
-                </button>
-                {assetPath.map((node) => (
-                  <React.Fragment key={node.key}>
-                    <ChevronRightIcon className="size-3.5 shrink-0" aria-hidden="true" />
-                    <button
-                      type="button"
-                      className={cn(
-                        "max-w-[16rem] truncate hover:text-foreground",
-                        node.key === assetScope && "font-medium text-foreground",
-                      )}
-                      title={node.label}
-                      onClick={() => setAssetScope(node.key)}
-                    >
-                      {node.display}
-                    </button>
-                  </React.Fragment>
-                ))}
-                <span className="ml-auto shrink-0 text-xs tabular-nums">
-                  {t("asset.totalCount", { count: flat.total })}
-                </span>
-              </div>
-              {flatListCard}
-            </div>
-          </div>
-        )}
+                  {(
+                    [
+                      ["all", t("severity.all")],
+                      ["critical", t("severity.critical")],
+                      ["high", t("severity.high")],
+                      ["medium", t("severity.medium")],
+                      ["low", t("severity.low")],
+                    ] as const
+                  ).map(([val, label]) => (
+                    <ToggleGroupItem key={val} value={val} aria-label={t("severity.ariaFilter", { label })}>
+                      {label}
+                    </ToggleGroupItem>
+                  ))}
+                </ToggleGroup>
 
-        {view === "grouped" && (
-          <div className="flex flex-col gap-3">
-            {groups.map((group) => {
-              const key = findingGroupKey(group);
-              const groupOpen = expandedGroups.has(key);
-              const state = groupFindings[key] ?? {
-                items: [],
-                total: group.count,
-                page: 1,
-                pageSize: 10,
-                loaded: false,
-                loading: false,
-              };
-              return (
-                <Card key={key} className="gap-0 py-0">
-                  <CardHeader className="px-4 py-3">
-                    <div className="flex min-w-0 flex-wrap items-center gap-3">
-                      <button
-                        type="button"
-                        className="flex min-w-0 flex-1 items-center gap-3 text-left"
-                        aria-expanded={groupOpen}
-                        onClick={() => toggleGroup(key)}
-                      >
-                        <ChevronRightIcon
-                          className={cn(
-                            "size-4 shrink-0 text-muted-foreground transition-transform",
-                            groupOpen && "rotate-90",
-                          )}
-                        />
-                        <div className="flex min-w-0 flex-col gap-1">
-                          <CardTitle className="truncate text-sm">
-                            {group.task_id === null
-                              ? t("task.unassigned")
-                              : group.task_name
-                                ? t("group.withName", { name: group.task_name, id: group.task_id })
-                                : t("group.taskOnly", { id: group.task_id })}
-                          </CardTitle>
-                          <CardDescription className="truncate" title={group.task_description}>
-                            {group.task_description || t("group.sourceUnavailable")}
-                          </CardDescription>
-                        </div>
-                      </button>
-                      <div className="flex flex-wrap items-center gap-2">
-                        {group.task_status && <StatusBadge domain="task" value={group.task_status} dot />}
-                        {SEVERITIES.map((level) => {
-                          const count = group[level];
-                          if (count === 0) return null;
-                          return (
-                            <span key={level} className="inline-flex items-center gap-1">
-                              <StatusBadge domain="severity" value={level} dot />
-                              <span className="text-xs tabular-nums text-muted-foreground">{count}</span>
+                <Select value={status} onValueChange={(v) => setStatus(v as "all" | FindingStatus)}>
+                  <SelectTrigger size="sm" className="w-32">
+                    <SelectValue placeholder={t("status.placeholder")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t("status.all")}</SelectItem>
+                    {FINDING_STATUSES.map((st) => (
+                      <SelectItem key={st} value={st}>
+                        {tStatus(`finding.${st}`)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                <Select value={vulnclass} onValueChange={setVulnclass}>
+                  <SelectTrigger size="sm" className="w-40">
+                    <SelectValue placeholder={t("vulnclass.placeholder")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t("vulnclass.all")}</SelectItem>
+                    {stats.vulnclasses.map((vc) => (
+                      <SelectItem key={vc} value={vc}>
+                        {vc}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                <Select value={task} onValueChange={setTask}>
+                  <SelectTrigger size="sm" className="w-48">
+                    <SelectValue placeholder={t("task.placeholder")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t("task.all")}</SelectItem>
+                    <SelectItem value={UNASSIGNED_TASK}>{t("task.unassigned")}</SelectItem>
+                    {(stats.tasks ?? []).map((taskOpt) => {
+                      const id = String(taskOpt.id);
+                      const label = taskOpt.name || taskOpt.description || t("task.deletedShort", { id });
+                      return (
+                        <SelectItem key={id} value={id}>
+                          <span className="flex w-full items-center gap-2">
+                            <span className="max-w-[14rem] truncate" title={label}>
+                              {label}
                             </span>
-                          );
-                        })}
-                        <span className="text-xs tabular-nums text-muted-foreground">
-                          {fmtTime(group.last_found_at)}
-                        </span>
-                        {group.task_id !== null && (
-                          <Button size="icon-sm" variant="ghost" asChild>
-                            <Link
-                              href={`/function/tasks/detail?id=${group.task_id}`}
-                              aria-label={t("group.viewTask", { id: group.task_id })}
-                            >
-                              <ArrowUpRightIcon />
-                            </Link>
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                  </CardHeader>
-                  {groupOpen && (
-                    <CardContent className="px-0">
-                      {state.loading && !state.loaded ? (
+                            <span className="inline-flex items-center gap-1 text-muted-foreground tabular-nums">
+                              <BugIcon className="size-3.5" aria-hidden="true" />
+                              {taskOpt.count}
+                            </span>
+                          </span>
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
+
+                <Select value={sort} onValueChange={(v) => setSort(v as "severity" | "time")}>
+                  <SelectTrigger size="sm" className="w-36">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="severity">{t("sort.severity")}</SelectItem>
+                    <SelectItem value="time">{t("sort.time")}</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                <div className="ml-auto flex items-center gap-3">
+                  {selectedIds.size > 0 && (
+                    <span className="text-muted-foreground text-xs tabular-nums">
+                      {t("selectedCount", { count: selectedIds.size })}
+                    </span>
+                  )}
+                  <Button size="sm" variant="outline" onClick={openExport}>
+                    <DownloadIcon /> {t("export")}
+                  </Button>
+                </div>
+              </>
+            }
+            viewSwitch={
+              <Tabs value={view} onValueChange={(v) => setView(v as FindingView)}>
+                <TabsList>
+                  <TabsTrigger value="flat">{t("view.flat")}</TabsTrigger>
+                  <TabsTrigger value="grouped">{t("view.grouped")}</TabsTrigger>
+                  <TabsTrigger value="asset">{t("view.asset")}</TabsTrigger>
+                </TabsList>
+              </Tabs>
+            }
+          />
+        }
+      >
+        <div className="px-4 py-3 md:px-6">
+          <StateBoundary
+            loading={viewLoading}
+            error={
+              viewFirstLoadFailed
+                ? {
+                    title: tp("errorTitle"),
+                    detail: tp("errorDetail"),
+                    code: errorCodeOf(lastError.current),
+                    codeLabel: tp("errorCodeLabel"),
+                    retryLabel: tp("retry"),
+                  }
+                : null
+            }
+            permission={perm.denied ? "findings:read" : null}
+            permissionProps={{
+              title: tp("permissionTitle"),
+              detail: tp("permissionDetail", { name: tn("item.findings"), ask: tp("askAdmin") }),
+              missingLabel: tp("permissionMissing"),
+              askLabel: tp("permissionAsk"),
+              ask: tp("askAdmin"),
+            }}
+            empty={viewEmpty}
+            emptyProps={{ title: tp("emptyTitle"), reason: tp("empty.findings") }}
+            onRetry={retryCurrentView}
+          >
+            <div className="flex flex-col gap-4">
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+                {statCards.map((stat) => {
+                  const StatIcon = stat.icon;
+                  return (
+                    <Card key={stat.label} className="gap-1 py-4">
+                      <CardHeader className="px-4">
+                        <CardDescription>{stat.label}</CardDescription>
+                        <CardTitle className={cn("flex items-center gap-2 text-2xl tabular-nums", stat.tone)}>
+                          <StatIcon className="size-5" aria-hidden="true" />
+                          {stat.value}
+                        </CardTitle>
+                      </CardHeader>
+                    </Card>
+                  );
+                })}
+              </div>
+
+              {view === "flat" && flatListCard}
+
+              {view === "asset" && (
+                <div className="grid min-h-0 items-start gap-4 lg:grid-cols-[20rem_minmax(0,1fr)] xl:grid-cols-[24rem_minmax(0,1fr)]">
+                  <Card className="gap-0 py-3 lg:sticky lg:top-4">
+                    <CardContent className="flex flex-col px-3">
+                      {assetTree.loading && !assetTree.loaded ? (
                         <div className="flex min-h-36 items-center justify-center">
                           <Spinner />
                         </div>
                       ) : (
-                        <>
-                          <FindingsTable items={state.items} selectAllLabel={t("selectAllGroup")} {...rowProps} />
-                          <TablePagination
-                            page={state.page}
-                            pageSize={state.pageSize}
-                            total={state.total}
-                            onPageChange={(nextPage) => void loadGroup(key, nextPage, state.pageSize)}
-                            onPageSizeChange={(nextSize) => void loadGroup(key, 1, nextSize)}
-                          />
-                        </>
+                        <AssetTree
+                          nodes={assetTree.nodes}
+                          selected={assetScope}
+                          onSelect={setAssetScope}
+                          loading={assetTree.loading}
+                          truncated={assetTree.truncated}
+                          droppedKinds={assetTree.droppedKinds}
+                          findingTotal={assetTree.findingTotal}
+                          onRefresh={() => void loadAssetTree()}
+                        />
                       )}
                     </CardContent>
-                  )}
-                </Card>
-              );
-            })}
-            {groups.length === 0 && (
-              <Card>
-                <CardContent className="py-12 text-center text-sm text-muted-foreground">{t("empty")}</CardContent>
-              </Card>
-            )}
-            <TablePagination
-              page={page}
-              pageSize={pageSize}
-              total={groupTotal}
-              onPageChange={setPage}
-              onPageSizeChange={(nextPageSize) => {
-                setPageSize(nextPageSize);
-                setPage(1);
-              }}
-              pageSizeOptions={[5, 10, 20]}
-            />
-          </div>
-        )}
-      </div>
+                  </Card>
+                  <div className="flex min-w-0 flex-col gap-2">
+                    <div className="flex min-w-0 flex-wrap items-center gap-1 text-sm text-muted-foreground">
+                      <button
+                        type="button"
+                        className={cn("hover:text-foreground", assetScope === null && "font-medium text-foreground")}
+                        onClick={() => setAssetScope(null)}
+                      >
+                        {t("asset.all")}
+                      </button>
+                      {assetPath.map((node) => (
+                        <React.Fragment key={node.key}>
+                          <ChevronRightIcon className="size-3.5 shrink-0" aria-hidden="true" />
+                          <button
+                            type="button"
+                            className={cn(
+                              "max-w-[16rem] truncate hover:text-foreground",
+                              node.key === assetScope && "font-medium text-foreground",
+                            )}
+                            title={node.label}
+                            onClick={() => setAssetScope(node.key)}
+                          >
+                            {node.display}
+                          </button>
+                        </React.Fragment>
+                      ))}
+                      <span className="ml-auto shrink-0 text-xs tabular-nums">
+                        {t("asset.totalCount", { count: flat.total })}
+                      </span>
+                    </div>
+                    {flatListCard}
+                  </div>
+                </div>
+              )}
+
+              {view === "grouped" && (
+                <div className="flex flex-col gap-3">
+                  {groups.map((group) => {
+                    const key = findingGroupKey(group);
+                    const groupOpen = expandedGroups.has(key);
+                    const state = groupFindings[key] ?? {
+                      items: [],
+                      total: group.count,
+                      page: 1,
+                      pageSize: 10,
+                      loaded: false,
+                      loading: false,
+                    };
+                    return (
+                      <Card key={key} className="gap-0 py-0">
+                        <CardHeader className="px-4 py-3">
+                          <div className="flex min-w-0 flex-wrap items-center gap-3">
+                            <button
+                              type="button"
+                              className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                              aria-expanded={groupOpen}
+                              onClick={() => toggleGroup(key)}
+                            >
+                              <ChevronRightIcon
+                                className={cn(
+                                  "size-4 shrink-0 text-muted-foreground transition-transform",
+                                  groupOpen && "rotate-90",
+                                )}
+                              />
+                              <div className="flex min-w-0 flex-col gap-1">
+                                <CardTitle className="truncate text-sm">
+                                  {group.task_id === null
+                                    ? t("task.unassigned")
+                                    : group.task_name
+                                      ? t("group.withName", { name: group.task_name, id: group.task_id })
+                                      : t("group.taskOnly", { id: group.task_id })}
+                                </CardTitle>
+                                <CardDescription className="truncate" title={group.task_description}>
+                                  {group.task_description || t("group.sourceUnavailable")}
+                                </CardDescription>
+                              </div>
+                            </button>
+                            <div className="flex flex-wrap items-center gap-2">
+                              {group.task_status && <StatusBadge domain="task" value={group.task_status} dot />}
+                              {SEVERITIES.map((level) => {
+                                const count = group[level];
+                                if (count === 0) return null;
+                                return (
+                                  <span key={level} className="inline-flex items-center gap-1">
+                                    <StatusBadge domain="severity" value={level} dot />
+                                    <span className="text-xs tabular-nums text-muted-foreground">{count}</span>
+                                  </span>
+                                );
+                              })}
+                              <span className="text-xs tabular-nums text-muted-foreground">
+                                {fmtTime(group.last_found_at)}
+                              </span>
+                              {group.task_id !== null && (
+                                <Button size="icon-sm" variant="ghost" asChild>
+                                  <Link
+                                    href={`/function/tasks/detail?id=${group.task_id}`}
+                                    aria-label={t("group.viewTask", { id: group.task_id })}
+                                  >
+                                    <ArrowUpRightIcon />
+                                  </Link>
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        </CardHeader>
+                        {groupOpen && (
+                          <CardContent className="px-0">
+                            {state.loading && !state.loaded ? (
+                              <div className="flex min-h-36 items-center justify-center">
+                                <Spinner />
+                              </div>
+                            ) : (
+                              <>
+                                <FindingsTable items={state.items} selectAllLabel={t("selectAllGroup")} {...rowProps} />
+                                <TablePagination
+                                  page={state.page}
+                                  pageSize={state.pageSize}
+                                  total={state.total}
+                                  onPageChange={(nextPage) => void loadGroup(key, nextPage, state.pageSize)}
+                                  onPageSizeChange={(nextSize) => void loadGroup(key, 1, nextSize)}
+                                />
+                              </>
+                            )}
+                          </CardContent>
+                        )}
+                      </Card>
+                    );
+                  })}
+                  <TablePagination
+                    page={page}
+                    pageSize={pageSize}
+                    total={groupTotal}
+                    onPageChange={setPage}
+                    onPageSizeChange={(nextPageSize) => {
+                      setPageSize(nextPageSize);
+                      setPage(1);
+                    }}
+                    pageSizeOptions={[5, 10, 20]}
+                  />
+                </div>
+              )}
+            </div>
+          </StateBoundary>
+        </div>
+      </PageShell>
 
       {retestFinding?.finding_id ? (
         <FindingRetestDialog
@@ -1273,7 +1361,7 @@ function FindingsPageInner() {
       </Dialog>
       {/* 右侧详情抽屉：URL 带 ?id= 就打开，刷新还原、链接可分享、后退即关 */}
       <FindingDrawer id={detail.id} open={detail.open} onClose={detail.closeDetail} onChanged={() => void loadFlat()} />
-    </div>
+    </>
   );
 }
 

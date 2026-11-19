@@ -7,6 +7,8 @@ import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { AgentEditor } from "@/components/agent-editor";
+import { StateBoundary } from "@/components/data/state-boundary";
+import { PageShell } from "@/components/shell/page-shell";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -34,8 +36,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
+import { usePermissionDenied } from "@/hooks/use-permission-denied";
 import { useAgentLabels } from "@/lib/agent-i18n";
 import { api } from "@/lib/api";
+import { errorCodeOf, errorMessageOf } from "@/lib/api-error";
 import type { Agent } from "@/lib/types";
 
 // AgentGridCard is one clickable tile opening the agent's editor drawer. Custom
@@ -197,16 +201,36 @@ function CreateAgentDialog({ onCreated }: { onCreated: (key: string) => void }) 
 
 export default function AgentsPage() {
   const t = useTranslations("agentsPage");
+  const tn = useTranslations("nav");
+  const tp = useTranslations("pageStates");
+  const perm = usePermissionDenied();
   const labels = useAgentLabels();
   const [agents, setAgents] = React.useState<Agent[]>([]);
   const [editKey, setEditKey] = React.useState<string | null>(null);
+  const [loaded, setLoaded] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const lastError = React.useRef<unknown>(null);
+
+  const checkPerm = perm.check;
+  const resetPerm = perm.reset;
 
   const reload = React.useCallback(() => {
     api
       .agents()
-      .then(setAgents)
-      .catch(() => setAgents([]));
-  }, []);
+      .then((list) => {
+        setAgents(list);
+        setError(null);
+        lastError.current = null;
+        resetPerm();
+      })
+      .catch((e) => {
+        lastError.current = e;
+        checkPerm(e);
+        setError(errorMessageOf(e));
+        setAgents([]);
+      })
+      .finally(() => setLoaded(true));
+  }, [checkPerm, resetPerm]);
   React.useEffect(() => {
     reload();
   }, [reload]);
@@ -214,37 +238,67 @@ export default function AgentsPage() {
   const editing = agents.find((a) => a.key === editKey) ?? null;
 
   return (
-    <div className="flex flex-1 flex-col gap-4 md:gap-6">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">{t("title")}</h1>
-          <p className="text-muted-foreground text-sm">{t("subtitle")}</p>
-        </div>
+    <PageShell
+      title={t("title")}
+      description={t("subtitle")}
+      breadcrumb={[{ label: tn("group.capability"), href: "/dashboard" }, { label: tn("item.agents") }]}
+      actions={
         <CreateAgentDialog
           onCreated={(key) => {
             reload();
             setEditKey(key);
           }}
         />
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("listTitle")}</CardTitle>
-          <CardDescription>{t("countTotal", { count: agents.length })}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {agents.length === 0 ? (
-            <p className="text-muted-foreground py-6 text-center text-sm">{t("empty")}</p>
-          ) : (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {agents.map((a) => (
-                <AgentGridCard key={a.key} agent={a} onOpen={() => setEditKey(a.key)} onDeleted={reload} />
+      }
+    >
+      <div className="px-4 py-3 md:px-6">
+        <StateBoundary
+          loading={!loaded}
+          error={
+            error
+              ? {
+                  title: tp("errorTitle"),
+                  detail: tp("errorDetail"),
+                  code: errorCodeOf(lastError.current),
+                  codeLabel: tp("errorCodeLabel"),
+                  retryLabel: tp("retry"),
+                }
+              : null
+          }
+          permission={perm.denied ? "agents:read" : null}
+          permissionProps={{
+            title: tp("permissionTitle"),
+            detail: tp("permissionDetail", { name: tn("item.agents"), ask: tp("askAdmin") }),
+            missingLabel: tp("permissionMissing"),
+            askLabel: tp("permissionAsk"),
+            ask: tp("askAdmin"),
+          }}
+          empty={loaded && !error && agents.length === 0}
+          emptyProps={{ title: tp("emptyTitle"), reason: tp("empty.agents") }}
+          skeleton={
+            <div className="space-y-2">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="h-14 animate-pulse rounded-md bg-muted" />
               ))}
             </div>
-          )}
-        </CardContent>
-      </Card>
+          }
+          onRetry={reload}
+        >
+          <Card>
+            <CardHeader>
+              <CardTitle>{t("listTitle")}</CardTitle>
+              <CardDescription>{t("countTotal", { count: agents.length })}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {agents.map((a) => (
+                  <AgentGridCard key={a.key} agent={a} onOpen={() => setEditKey(a.key)} onDeleted={reload} />
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </StateBoundary>
+      </div>
 
       <Sheet open={!!editing} onOpenChange={(o) => !o && setEditKey(null)}>
         <SheetContent
@@ -270,6 +324,6 @@ export default function AgentsPage() {
           )}
         </SheetContent>
       </Sheet>
-    </div>
+    </PageShell>
   );
 }

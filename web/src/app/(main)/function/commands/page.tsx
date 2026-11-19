@@ -2,9 +2,12 @@
 
 import * as React from "react";
 
-import { BarChart3Icon, ChevronLeftIcon, ChevronRightIcon, Loader2Icon, SearchIcon, TerminalIcon } from "lucide-react";
+import { BarChart3Icon, ChevronLeftIcon, ChevronRightIcon, Loader2Icon, SearchIcon } from "lucide-react";
 import { useTranslations } from "next-intl";
 
+import { StateBoundary } from "@/components/data/state-boundary";
+import { PageShell } from "@/components/shell/page-shell";
+import { Toolbar } from "@/components/shell/toolbar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -13,8 +16,10 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { usePermissionDenied } from "@/hooks/use-permission-denied";
 import { getDateLocale } from "@/i18n/datetime";
 import { api } from "@/lib/api";
+import { errorCodeOf } from "@/lib/api-error";
 import type { CommandRecord, ToolStat } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -54,6 +59,10 @@ const CMD_MAX_LEN = 80;
 export default function CommandsPage() {
   const t = useTranslations("commands");
   const tp = useTranslations("pagination");
+  const tn = useTranslations("nav");
+  const tps = useTranslations("pageStates");
+  const perm = usePermissionDenied();
+  const lastError = React.useRef<unknown>(null);
   const [page, setPage] = React.useState(0);
   const [size, setSize] = React.useState(50);
   const [query, setQuery] = React.useState("");
@@ -63,6 +72,10 @@ export default function CommandsPage() {
   const [commands, setCommands] = React.useState<CommandRecord[]>([]);
   const [total, setTotal] = React.useState(0);
   const [loading, setLoading] = React.useState(false);
+
+  // 四态：错误文案与手动重取触发器（重试按钮用）。
+  const [error, setError] = React.useState<string | null>(null);
+  const [reloadTick, setReloadTick] = React.useState(0);
 
   // 各工具的调用次数。仅在打开弹窗时获取（会多一次聚合查询，因此不在每次翻页时增加负担）。
   const [statsOpen, setStatsOpen] = React.useState(false);
@@ -94,9 +107,15 @@ export default function CommandsPage() {
         if (!alive) return;
         setCommands(r.commands ?? []);
         setTotal(r.total ?? 0);
+        setError(null);
+        lastError.current = null;
+        perm.reset();
       })
-      .catch(() => {
+      .catch((e) => {
+        lastError.current = e;
+        perm.check(e);
         if (!alive) return;
+        setError(e instanceof Error ? e.message : String(e));
         setCommands([]);
         setTotal(0);
       })
@@ -104,7 +123,7 @@ export default function CommandsPage() {
     return () => {
       alive = false;
     };
-  }, [page, size, queryQ, taskFilter]);
+  }, [page, size, queryQ, taskFilter, reloadTick]);
 
   // 统计跟随筛选条件，针对与表格展示相同的记录集合（但不分页）。
   React.useEffect(() => {
@@ -129,53 +148,51 @@ export default function CommandsPage() {
   const rangeEnd = page * size + commands.length;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4">
-      {/* Header */}
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-2">
-          <TerminalIcon className="h-5 w-5 text-muted-foreground" />
-          <h1 className="text-xl font-semibold tracking-tight">{t("title")}</h1>
-          <Badge variant="secondary">{total}</Badge>
-        </div>
-      </div>
-
-      {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative max-w-sm flex-1">
-          <SearchIcon className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder={t("searchPlaceholder")}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="h-8 pl-8"
-          />
-        </div>
-        <Input
-          placeholder={t("taskIdPlaceholder")}
-          className="h-8 w-28"
-          value={taskFilter}
-          onChange={(e) => setTaskFilter(e.target.value.replace(/\D/g, ""))}
-        />
-        <Select value={String(size)} onValueChange={(v) => setSize(Number(v))}>
-          <SelectTrigger size="sm" className="w-28">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {PAGE_SIZES.map((n) => (
-              <SelectItem key={n} value={String(n)}>
-                {n}
-                {tp("perPage")}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        <Button variant="outline" size="sm" className="h-8" onClick={() => setStatsOpen(true)}>
-          <BarChart3Icon className="size-4" />
-          {t("stats")}
-        </Button>
-
-        <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
+    <PageShell
+      title={t("title")}
+      breadcrumb={[{ label: tn("group.observe"), href: "/dashboard" }, { label: tn("item.commands") }]}
+      toolbar={
+        <Toolbar
+          search={
+            <div className="relative">
+              <SearchIcon className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder={t("searchPlaceholder")}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                className="h-8 pl-8"
+              />
+            </div>
+          }
+          filters={
+            <>
+              <Input
+                placeholder={t("taskIdPlaceholder")}
+                className="h-8 w-28"
+                value={taskFilter}
+                onChange={(e) => setTaskFilter(e.target.value.replace(/\D/g, ""))}
+              />
+              <Select value={String(size)} onValueChange={(v) => setSize(Number(v))}>
+                <SelectTrigger size="sm" className="w-28">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PAGE_SIZES.map((n) => (
+                    <SelectItem key={n} value={String(n)}>
+                      {n}
+                      {tp("perPage")}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button variant="outline" size="sm" className="h-8" onClick={() => setStatsOpen(true)}>
+                <BarChart3Icon className="size-4" />
+                {t("stats")}
+              </Button>
+            </>
+          }
+          viewSwitch={
+            <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
           <span className="tabular-nums">
             {rangeStart}–{rangeEnd} / {total}
           </span>
@@ -201,10 +218,42 @@ export default function CommandsPage() {
             <ChevronRightIcon />
           </Button>
         </div>
-      </div>
-
-      {/* History table */}
-      <div className="flex h-[calc(100vh-13rem)] min-h-0 flex-col">
+          }
+        />
+      }
+    >
+      <div className="px-4 py-3 md:px-6">
+        <StateBoundary
+          className="flex h-[calc(100vh-13rem)] min-h-0 flex-col"
+          loading={loading && commands.length === 0}
+          error={
+            error
+              ? {
+                  title: tps("errorTitle"),
+                  detail: tps("errorDetail"),
+                  code: errorCodeOf(lastError.current),
+                  codeLabel: tps("errorCodeLabel"),
+                  retryLabel: tps("retry"),
+                }
+              : null
+          }
+          permission={perm.denied ? "commands:read" : null}
+          permissionProps={{
+            title: tps("permissionTitle"),
+            detail: tps("permissionDetail", { name: tn("item.commands"), ask: tps("askAdmin") }),
+            missingLabel: tps("permissionMissing"),
+            askLabel: tps("permissionAsk"),
+            ask: tps("askAdmin"),
+          }}
+          empty={!loading && !error && commands.length === 0}
+          emptyProps={{ title: tps("emptyTitle"), reason: tps("empty.commands") }}
+          onRetry={() => {
+            setError(null);
+            lastError.current = null;
+            perm.reset();
+            setReloadTick((n) => n + 1);
+          }}
+        >
         <Card className="flex min-h-0 flex-1 flex-col overflow-hidden py-0">
           <div className="min-h-0 flex-1 overflow-auto">
             <Table>
@@ -219,20 +268,7 @@ export default function CommandsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {loading && commands.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={6} className="py-12 text-center">
-                      <Loader2Icon className="mx-auto h-5 w-5 animate-spin text-muted-foreground" />
-                    </TableCell>
-                  </TableRow>
-                ) : commands.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={6} className="py-12 text-center text-sm text-muted-foreground">
-                      {t("empty")}
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  commands.map((cmd) => (
+                {commands.map((cmd) => (
                     <TableRow
                       key={cmd.id}
                       className={cn("cursor-pointer", selected?.id === cmd.id && "bg-accent hover:bg-accent")}
@@ -263,21 +299,20 @@ export default function CommandsPage() {
                             {t("failed")}
                           </Badge>
                         ) : (
-                          <Badge variant="secondary" className="text-xs text-emerald-600">
+                          <Badge variant="secondary" className="text-xs">
                             {t("success")}
                           </Badge>
                         )}
                       </TableCell>
                     </TableRow>
-                  ))
-                )}
+                  ))}
               </TableBody>
             </Table>
           </div>
         </Card>
-      </div>
+        </StateBoundary>
 
-      {/* 工具调用统计：与表格相同的记录集合（相同筛选，无分页）*/}
+        {/* 工具调用统计：与表格相同的记录集合（相同筛选，无分页）*/}
       <Dialog open={statsOpen} onOpenChange={setStatsOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
@@ -293,7 +328,7 @@ export default function CommandsPage() {
                   {statsErrors > 0 && (
                     <>
                       {" · "}
-                      {t("failed")} <span className="tabular-nums text-red-600 dark:text-red-400">{statsErrors}</span>
+                      {t("failed")} <span className="text-destructive tabular-nums">{statsErrors}</span>
                     </>
                   )}
                 </>
@@ -315,7 +350,7 @@ export default function CommandsPage() {
                     <div className="flex items-center gap-2">
                       <span className="truncate font-mono text-xs font-medium">{s.tool}</span>
                       {s.errors > 0 && (
-                        <span className="text-[11px] tabular-nums text-red-600 dark:text-red-400">
+                        <span className="text-destructive text-[11px] tabular-nums">
                           {t("failed")} {s.errors}
                         </span>
                       )}
@@ -362,7 +397,7 @@ export default function CommandsPage() {
                       {t("failed")}
                     </Badge>
                   ) : (
-                    <Badge variant="secondary" className="text-xs text-emerald-600">
+                    <Badge variant="secondary" className="text-xs">
                       {t("success")}
                     </Badge>
                   )}
@@ -383,7 +418,7 @@ export default function CommandsPage() {
                     <pre
                       className={cn(
                         "p-5 font-mono text-xs break-all whitespace-pre-wrap",
-                        selected.is_error && "text-red-600 dark:text-red-400",
+                        selected.is_error && "text-destructive",
                       )}
                     >
                       {selected.output || t("emptyOutput")}
@@ -394,7 +429,8 @@ export default function CommandsPage() {
             </>
           )}
         </SheetContent>
-      </Sheet>
-    </div>
+        </Sheet>
+      </div>
+    </PageShell>
   );
 }

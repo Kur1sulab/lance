@@ -9,6 +9,8 @@ import { ArchiveIcon, ArrowLeftIcon, BrainIcon, CheckIcon, CircleAlertIcon, Paus
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
+import { StateBoundary } from "@/components/data/state-boundary";
+import { PageShell } from "@/components/shell/page-shell";
 import { StatusBadge } from "@/components/status-badge";
 import { TaskLLMProfileChain } from "@/components/task-llm-profile-chain";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -32,12 +34,13 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { usePermissionDenied } from "@/hooks/use-permission-denied";
 import { api } from "@/lib/api";
+import { errorCodeOf, errorMessageOf } from "@/lib/api-error";
 import type { LLMProfile, Task } from "@/lib/types";
 
 import { AssetsTab } from "./_tabs/assets-tab";
@@ -206,12 +209,22 @@ function TaskLLMControl({ task, profiles, onUpdated }: { task: Task; profiles: L
 
 function TaskDetailInner() {
   const t = useTranslations("taskDetail");
+  const tn = useTranslations("nav");
+  const tp = useTranslations("pageStates");
+  const perm = usePermissionDenied();
+  // perm.check 是稳定引用，load 的 useCallback 依赖它不会打断 5s 轮询。
+  const checkPermission = perm.check;
+  const lastError = React.useRef<unknown>(null);
   const router = useRouter();
   const searchParams = useSearchParams();
   const id = searchParams.get("id") ?? "";
   const [task, setTask] = React.useState<Task | null>(null);
   const [paused, setPaused] = React.useState(false);
   const [loaded, setLoaded] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  // 已经渲染过任务时，轮询抖动不应把整页替换成错误态——只有首屏失败才落错误。
+  const hasTaskRef = React.useRef(false);
+  hasTaskRef.current = task !== null;
   const [tab, setTab] = React.useState("sessions");
   const [interceptPendingCount, setInterceptPendingCount] = React.useState(0);
   const [profiles, setProfiles] = React.useState<LLMProfile[]>([]);
@@ -250,6 +263,7 @@ function TaskDetailInner() {
     Promise.all([api.task(id), api.stats(id).catch(() => null)])
       .then(([task, s]) => {
         if (taskLoadInFlight.current !== id) return;
+        setError(null);
         const base = { ...task };
         const at = s?.active_task;
         if (at) {
@@ -262,8 +276,12 @@ function TaskDetailInner() {
         setTask(base);
         setPaused(at?.paused ?? base.paused ?? false);
       })
-      .catch(() => {
+      .catch((e) => {
         // Keep the last rendered task state during a transient poll failure.
+        // 首屏失败必须落错误态，否则页面永远停在骨架屏；已渲染过的任务保持原样。
+        checkPermission(e);
+        lastError.current = e;
+        if (!hasTaskRef.current) setError(errorMessageOf(e));
       })
       .finally(() => {
         if (taskLoadInFlight.current === id) {
@@ -271,7 +289,7 @@ function TaskDetailInner() {
           setLoaded(true);
         }
       });
-  }, [id]);
+  }, [checkPermission, id]);
   React.useEffect(() => {
     load();
     const timer = setInterval(load, 5000);
@@ -305,16 +323,68 @@ function TaskDetailInner() {
 
   if (!task) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-3 p-10 text-center">
-        <p className="text-muted-foreground">{loaded ? t("header.notFound", { id }) : t("header.loading")}</p>
-        {loaded && (
-          <Button asChild variant="outline">
+      <PageShell
+        className="min-h-0 flex-1"
+        title={tn("item.tasks")}
+        breadcrumb={[
+          { label: tn("group.war"), href: "/dashboard" },
+          { label: tn("item.tasks"), href: "/function/tasks" },
+          { label: id || tn("item.tasks") },
+        ]}
+        actions={
+          <Button asChild variant="outline" size="sm">
             <Link href="/function/tasks">
-              <ArrowLeftIcon /> {t("header.backToList")}
+              <ArrowLeftIcon data-icon="inline-start" /> {t("header.backToList")}
             </Link>
           </Button>
-        )}
-      </div>
+        }
+      >
+        <div className="p-4 lg:p-6">
+          <StateBoundary
+            loading={!loaded}
+            error={
+              error
+                ? {
+                    title: tp("errorTitle"),
+                    detail: tp("errorDetail"),
+                    code: errorCodeOf(lastError.current),
+                    codeLabel: tp("errorCodeLabel"),
+                    retryLabel: tp("retry"),
+                  }
+                : null
+            }
+            permission={perm.denied ? "taskDetail:read" : null}
+            permissionProps={{
+              title: tp("permissionTitle"),
+              detail: tp("permissionDetail", { name: tn("item.tasks"), ask: tp("askAdmin") }),
+              missingLabel: tp("permissionMissing"),
+              askLabel: tp("permissionAsk"),
+              ask: tp("askAdmin"),
+            }}
+            empty={loaded}
+            emptyProps={{ title: tp("emptyTitle"), reason: t("header.notFound", { id }) }}
+            skeleton={
+              <div className="space-y-2">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <div
+                    // biome-ignore lint/suspicious/noArrayIndexKey: 骨架屏占位，无真实数据标识。
+                    key={i}
+                    className="h-10 animate-pulse rounded-md bg-muted"
+                  />
+                ))}
+              </div>
+            }
+            onRetry={() => {
+              setError(null);
+              lastError.current = null;
+              perm.reset();
+              load();
+            }}
+          >
+            {null}
+          </StateBoundary>
+        </div>
+      </PageShell>
     );
   }
 
@@ -351,103 +421,139 @@ function TaskDetailInner() {
   );
 
   return (
-    <Tabs value={tab} onValueChange={setTab} className="flex flex-1 flex-col gap-0">
-      {/* Top fixed area */}
-      <header className="sticky top-0 z-10 flex flex-col gap-2 border-b bg-background/95 px-4 py-2.5 backdrop-blur lg:px-6">
-        <div className="flex items-center gap-2">
-          <SidebarTrigger className="-ml-1" />
-          <Button asChild variant="ghost" size="icon" className="size-7">
-            <Link href="/function/tasks">
-              <ArrowLeftIcon />
-            </Link>
-          </Button>
-          <h1 className="min-w-0 flex-1 truncate text-sm font-semibold" title={task.name || task.description}>
-            {task.name || task.description}
-          </h1>
-          <code className="hidden rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground sm:inline">
-            {task.id}
-          </code>
-          <Separator orientation="vertical" className="mx-1 hidden h-4 sm:block" />
-          <TaskLLMControl task={task} profiles={profiles} onUpdated={load} />
-          <StatusBadge domain={terminal ? "task" : "engine"} value={terminal ? task.status : engineMode} dot />
-          {canArchive ? (
-            <AlertDialog>
-              <AlertDialogTrigger asChild>{archiveTrigger}</AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>{t("archive.dialogTitle", { id: task.id })}</AlertDialogTitle>
-                  <AlertDialogDescription>{t("archive.dialogDesc")}</AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>{t("archive.cancel")}</AlertDialogCancel>
-                  <AlertDialogAction onClick={() => void archiveTask()}>{t("archive.confirm")}</AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-          ) : (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="inline-flex">{archiveTrigger}</span>
-              </TooltipTrigger>
-              <TooltipContent>{archiveDisabledReason}</TooltipContent>
-            </Tooltip>
-          )}
-          <Button size="sm" variant={controlVariant} onClick={togglePause} disabled={terminal}>
-            {controlIcon}
-            {controlLabel}
-          </Button>
+    <Tabs value={tab} onValueChange={setTab} className="flex h-full min-h-0 flex-1 flex-col gap-0">
+      <PageShell
+        className="min-h-0 flex-1"
+        title={task.name || task.description}
+        description={task.goal}
+        breadcrumb={[
+          { label: tn("group.war"), href: "/dashboard" },
+          { label: tn("item.tasks"), href: "/function/tasks" },
+          { label: task.name || task.description },
+        ]}
+        actions={
+          <>
+            <div className="flex items-center gap-1">
+              <SidebarTrigger className="-ml-1" />
+              <Button asChild variant="ghost" size="icon" className="size-7">
+                <Link href="/function/tasks" aria-label={t("header.backToList")}>
+                  <ArrowLeftIcon />
+                </Link>
+              </Button>
+            </div>
+            <Button size="sm" variant={controlVariant} onClick={togglePause} disabled={terminal}>
+              {controlIcon}
+              {controlLabel}
+            </Button>
+          </>
+        }
+        toolbar={
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="no-scrollbar min-w-0 flex-1 overflow-x-auto">
+              <TabsList variant="default" className="min-w-max">
+                {TAB_VALUES.map((value) => (
+                  <TabsTrigger key={value} value={value}>
+                    {t(`tabs.${value}`)}
+                    {value === "intercept" && interceptPendingCount > 0 && (
+                      <span className="ml-1.5 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-primary px-1 font-semibold text-[10px] text-primary-foreground leading-none">
+                        {interceptPendingCount > 99 ? "99+" : interceptPendingCount}
+                      </span>
+                    )}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </div>
+            <code className="hidden rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground sm:inline">
+              {task.id}
+            </code>
+            <TaskLLMControl task={task} profiles={profiles} onUpdated={load} />
+            <StatusBadge domain={terminal ? "task" : "engine"} value={terminal ? task.status : engineMode} dot />
+            {canArchive ? (
+              <AlertDialog>
+                <AlertDialogTrigger asChild>{archiveTrigger}</AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>{t("archive.dialogTitle", { id: task.id })}</AlertDialogTitle>
+                    <AlertDialogDescription>{t("archive.dialogDesc")}</AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>{t("archive.cancel")}</AlertDialogCancel>
+                    <AlertDialogAction onClick={() => void archiveTask()}>{t("archive.confirm")}</AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            ) : (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="inline-flex">{archiveTrigger}</span>
+                </TooltipTrigger>
+                <TooltipContent>{archiveDisabledReason}</TooltipContent>
+              </Tooltip>
+            )}
+          </div>
+        }
+      >
+        <div className="p-4 lg:p-6">
+          <StateBoundary
+            error={
+              error
+                ? {
+                    title: tp("errorTitle"),
+                    detail: tp("errorDetail"),
+                    code: errorCodeOf(lastError.current),
+                    codeLabel: tp("errorCodeLabel"),
+                    retryLabel: tp("retry"),
+                  }
+                : null
+            }
+            permission={perm.denied ? "taskDetail:read" : null}
+            permissionProps={{
+              title: tp("permissionTitle"),
+              detail: tp("permissionDetail", { name: tn("item.tasks"), ask: tp("askAdmin") }),
+              missingLabel: tp("permissionMissing"),
+              askLabel: tp("permissionAsk"),
+              ask: tp("askAdmin"),
+            }}
+            onRetry={() => {
+              setError(null);
+              lastError.current = null;
+              perm.reset();
+              load();
+            }}
+          >
+            <TabsContent value="sessions" className="mt-0">
+              <SessionsTab taskId={id} />
+            </TabsContent>
+            <TabsContent value="overview" className="mt-0">
+              <OverviewTab taskId={id} />
+            </TabsContent>
+            <TabsContent value="graph" className="mt-0">
+              <GraphTab taskId={id} />
+            </TabsContent>
+            <TabsContent value="broadcast" className="mt-0">
+              <BroadcastTab taskId={id} />
+            </TabsContent>
+            <TabsContent value="findings" className="mt-0">
+              <FindingsTab taskId={id} />
+            </TabsContent>
+            <TabsContent value="retests" className="mt-0">
+              <RetestsTab key={id} taskId={id} />
+            </TabsContent>
+            <TabsContent value="assets" className="mt-0">
+              <AssetsTab taskId={id} />
+            </TabsContent>
+            <TabsContent value="coverage" className="mt-0">
+              <CoverageGraphTab taskId={id} coverageEnabled={task?.coverage_enabled !== false} />
+            </TabsContent>
+            <TabsContent value="intercept" className="mt-0">
+              <InterceptTab taskId={id} />
+            </TabsContent>
+            <TabsContent value="report" className="mt-0">
+              <ReportTab taskId={id} />
+            </TabsContent>
+          </StateBoundary>
         </div>
-        <p className="truncate text-xs text-muted-foreground">{task.goal}</p>
-        {/* Tabs */}
-        <div className="no-scrollbar min-w-0 overflow-x-auto">
-          <TabsList variant="default" className="min-w-max">
-            {TAB_VALUES.map((value) => (
-              <TabsTrigger key={value} value={value}>
-                {t(`tabs.${value}`)}
-                {value === "intercept" && interceptPendingCount > 0 && (
-                  <span className="ml-1.5 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-semibold leading-none text-white">
-                    {interceptPendingCount > 99 ? "99+" : interceptPendingCount}
-                  </span>
-                )}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </div>
-      </header>
-
-      {/* Tab content */}
-      <div className="flex-1 p-4 lg:p-6">
-        <TabsContent value="sessions" className="mt-0">
-          <SessionsTab taskId={id} />
-        </TabsContent>
-        <TabsContent value="overview" className="mt-0">
-          <OverviewTab taskId={id} />
-        </TabsContent>
-        <TabsContent value="graph" className="mt-0">
-          <GraphTab taskId={id} />
-        </TabsContent>
-        <TabsContent value="broadcast" className="mt-0">
-          <BroadcastTab taskId={id} />
-        </TabsContent>
-        <TabsContent value="findings" className="mt-0">
-          <FindingsTab taskId={id} />
-        </TabsContent>
-        <TabsContent value="retests" className="mt-0">
-          <RetestsTab key={id} taskId={id} />
-        </TabsContent>
-        <TabsContent value="assets" className="mt-0">
-          <AssetsTab taskId={id} />
-        </TabsContent>
-        <TabsContent value="coverage" className="mt-0">
-          <CoverageGraphTab taskId={id} coverageEnabled={task?.coverage_enabled !== false} />
-        </TabsContent>
-        <TabsContent value="intercept" className="mt-0">
-          <InterceptTab taskId={id} />
-        </TabsContent>
-        <TabsContent value="report" className="mt-0">
-          <ReportTab taskId={id} />
-        </TabsContent>
-      </div>
+      </PageShell>
     </Tabs>
   );
 }

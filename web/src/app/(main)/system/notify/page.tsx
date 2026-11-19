@@ -6,6 +6,8 @@ import { BellIcon, PlusIcon, SendIcon, Trash2Icon } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
+import { StateBoundary } from "@/components/data/state-boundary";
+import { PageShell } from "@/components/shell/page-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,7 +18,9 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { usePermissionDenied } from "@/hooks/use-permission-denied";
 import { api } from "@/lib/api";
+import { errorCodeOf } from "@/lib/api-error";
 import type { NotificationChannel, NotificationFilter, NotificationMeta } from "@/lib/types";
 
 import {
@@ -38,6 +42,19 @@ import { formatBacklog, StatTile } from "./_components/stat-tile";
 // 拆开是因为它们各自能被单独读懂，而挤在一个文件里时这个页面接近 1100 行。
 export default function NotifyPage() {
   const t = useTranslations("notifyPage");
+  const tn = useTranslations("nav");
+  const tp = useTranslations("pageStates");
+  const { denied, check: checkPermission, reset: resetPermission } = usePermissionDenied();
+  const lastError = React.useRef<unknown>(null);
+  const [error, setError] = React.useState<string | null>(null);
+  // 首屏骨架开关。meta 与渠道列表是两条独立请求，两条都落地（成功或失败）才收起骨架，
+  // 否则先到的那条会把「还在加载」渲染成「一个渠道都没有」。
+  const [loading, setLoading] = React.useState(true);
+  const inflight = React.useRef(2);
+  const settle = React.useCallback(() => {
+    inflight.current -= 1;
+    if (inflight.current <= 0) setLoading(false);
+  }, []);
   // 渠道类型展示名：已知的 6 种走 i18n（notifyPage.kind.<kind>），
   // 后端若回传未知类型则原样显示该 key（保留原来的 `?? ch.kind` 语义）。
   const kindLabel = (k: string) => (k in CHANNEL_FIELDS ? t(`kind.${k}`) : k);
@@ -56,6 +73,7 @@ export default function NotifyPage() {
   const [digestMin, setDigestMin] = React.useState("");
 
   const load = React.useCallback(() => {
+    inflight.current = 2;
     api
       .notifyMeta()
       .then((m) => {
@@ -63,14 +81,26 @@ export default function NotifyPage() {
         setBaseURL(m.public_base_url);
         setDigestMin(m.digest_interval_min);
       })
-      .catch((e) => toast.error(t("toast.loadConfigFailed", { msg: (e as Error).message })));
+      .catch((e) => {
+        lastError.current = e;
+        checkPermission(e);
+        setError((e as Error).message);
+        toast.error(t("toast.loadConfigFailed", { msg: (e as Error).message }));
+      })
+      .finally(settle);
     // 渠道列表加载失败要报出来：静默失败会显示成「一个渠道都没有」，
     // 用户会以为配置丢了，比直接报错更让人慌。
     api
       .notifyChannels()
       .then(setChannels)
-      .catch((e) => toast.error(t("toast.loadChannelsFailed", { msg: (e as Error).message })));
-  }, [t]);
+      .catch((e) => {
+        lastError.current = e;
+        checkPermission(e);
+        setError((e as Error).message);
+        toast.error(t("toast.loadChannelsFailed", { msg: (e as Error).message }));
+      })
+      .finally(settle);
+  }, [t, checkPermission, settle]);
   React.useEffect(() => {
     load();
   }, [load]);
@@ -268,13 +298,12 @@ export default function NotifyPage() {
   const defaultRate = meta?.kinds.find((k) => k.kind === form.kind)?.default_rate_per_min ?? 0;
 
   return (
-    <div className="flex flex-1 flex-col gap-4 md:gap-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">{t("title")}</h1>
-          <p className="text-muted-foreground text-sm">{t("subtitle")}</p>
-        </div>
-        {meta && (
+    <PageShell
+      title={t("title")}
+      description={t("subtitle")}
+      breadcrumb={[{ label: tn("group.govern"), href: "/dashboard" }, { label: tn("item.notify") }]}
+      actions={
+        meta ? (
           // 用 div 而不是 label：Switch 自带 aria-label，外面再套一层 label
           // 既关联不到任何原生控件，又会让点击文字看起来应该能切换。
           <div className="flex shrink-0 items-center gap-2 text-sm">
@@ -286,140 +315,193 @@ export default function NotifyPage() {
               aria-label={t("aria.globalSwitch")}
             />
           </div>
-        )}
-      </div>
+        ) : null
+      }
+    >
+      <div className="px-4 py-3 md:px-6">
+        <StateBoundary
+          loading={loading}
+          error={
+            error
+              ? {
+                  title: tp("errorTitle"),
+                  detail: tp("errorDetail"),
+                  code: errorCodeOf(lastError.current),
+                  codeLabel: tp("errorCodeLabel"),
+                  retryLabel: tp("retry"),
+                }
+              : null
+          }
+          permission={denied ? "notify:read" : null}
+          permissionProps={{
+            title: tp("permissionTitle"),
+            detail: tp("permissionDetail", { name: tn("item.notify"), ask: tp("askAdmin") }),
+            missingLabel: tp("permissionMissing"),
+            askLabel: tp("permissionAsk"),
+            ask: tp("askAdmin"),
+          }}
+          skeleton={
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div
+                  // biome-ignore lint/suspicious/noArrayIndexKey: 骨架屏占位，无真实数据标识。
+                  key={i}
+                  className="h-[130px] animate-pulse rounded-xl bg-muted"
+                />
+              ))}
+            </div>
+          }
+          onRetry={() => {
+            setError(null);
+            lastError.current = null;
+            resetPermission();
+            load();
+          }}
+        >
+          <div className="flex flex-col gap-4 md:gap-6">
+            {meta && (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+                <StatTile
+                  label={t("stats.channels")}
+                  value={`${meta.stats.channels_on} / ${meta.stats.channels}`}
+                  hint={t("stats.channelsHint")}
+                />
+                <StatTile label={t("stats.sentToday")} value={String(meta.stats.sent_today)} />
+                <StatTile label={t("stats.pending")} value={String(meta.stats.pending)} />
+                <StatTile
+                  label={t("stats.failed")}
+                  value={String(meta.stats.failed)}
+                  tone={meta.stats.failed > 0 ? "red" : undefined}
+                />
+                <StatTile
+                  label={t("stats.backlog")}
+                  value={formatBacklog(meta.stats.backlog_age_ms, t)}
+                  // 积压年龄比积压条数有用得多：积压 3 条可以是从 3 秒到 3 小时。
+                  hint={meta.stats.backlog_age_ms > 5 * 60_000 ? t("stats.backlogStuck") : undefined}
+                  tone={meta.stats.backlog_age_ms > 5 * 60_000 ? "red" : undefined}
+                />
+              </div>
+            )}
 
-      {meta && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-          <StatTile
-            label={t("stats.channels")}
-            value={`${meta.stats.channels_on} / ${meta.stats.channels}`}
-            hint={t("stats.channelsHint")}
-          />
-          <StatTile label={t("stats.sentToday")} value={String(meta.stats.sent_today)} />
-          <StatTile label={t("stats.pending")} value={String(meta.stats.pending)} />
-          <StatTile
-            label={t("stats.failed")}
-            value={String(meta.stats.failed)}
-            tone={meta.stats.failed > 0 ? "red" : undefined}
-          />
-          <StatTile
-            label={t("stats.backlog")}
-            value={formatBacklog(meta.stats.backlog_age_ms, t)}
-            // 积压年龄比积压条数有用得多：积压 3 条可以是从 3 秒到 3 小时。
-            hint={meta.stats.backlog_age_ms > 5 * 60_000 ? t("stats.backlogStuck") : undefined}
-            tone={meta.stats.backlog_age_ms > 5 * 60_000 ? "red" : undefined}
-          />
-        </div>
-      )}
+            <Card className="gap-3">
+              <CardHeader>
+                <CardTitle className="text-base">{t("global.title")}</CardTitle>
+              </CardHeader>
+              <CardContent className="grid gap-4 sm:grid-cols-2">
+                <div className="grid gap-2">
+                  <Label htmlFor="n-base">{t("global.baseUrl")}</Label>
+                  <Input
+                    id="n-base"
+                    placeholder="https://your-domain.example.com"
+                    value={baseURL}
+                    onChange={(e) => setBaseURL(e.target.value)}
+                  />
+                  <p className="text-muted-foreground text-xs">{t("global.baseUrlHint")}</p>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="n-digest">{t("global.digest")}</Label>
+                  <Input
+                    id="n-digest"
+                    type="number"
+                    min={1}
+                    max={1440}
+                    placeholder="30"
+                    value={digestMin}
+                    onChange={(e) => setDigestMin(e.target.value)}
+                  />
+                  <p className="text-muted-foreground text-xs">{t("global.digestHint")}</p>
+                </div>
+                <div className="sm:col-span-2">
+                  <Button onClick={saveGlobal} disabled={globalSaving}>
+                    {t("global.save")}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
 
-      <Card className="gap-3">
-        <CardHeader>
-          <CardTitle className="text-base">{t("global.title")}</CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-2">
-          <div className="grid gap-2">
-            <Label htmlFor="n-base">{t("global.baseUrl")}</Label>
-            <Input
-              id="n-base"
-              placeholder="https://your-domain.example.com"
-              value={baseURL}
-              onChange={(e) => setBaseURL(e.target.value)}
-            />
-            <p className="text-muted-foreground text-xs">{t("global.baseUrlHint")}</p>
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="n-digest">{t("global.digest")}</Label>
-            <Input
-              id="n-digest"
-              type="number"
-              min={1}
-              max={1440}
-              placeholder="30"
-              value={digestMin}
-              onChange={(e) => setDigestMin(e.target.value)}
-            />
-            <p className="text-muted-foreground text-xs">{t("global.digestHint")}</p>
-          </div>
-          <div className="sm:col-span-2">
-            <Button onClick={saveGlobal} disabled={globalSaving}>
-              {t("global.save")}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+            <Tabs value={tab} onValueChange={(v) => setTab(v as "channels" | "deliveries")} className="flex flex-col gap-4">
+              <TabsList>
+                <TabsTrigger value="channels">{t("tab.channels")}</TabsTrigger>
+                <TabsTrigger value="deliveries">{t("tab.deliveries")}</TabsTrigger>
+              </TabsList>
 
-      <Tabs value={tab} onValueChange={(v) => setTab(v as "channels" | "deliveries")} className="flex flex-col gap-4">
-        <TabsList>
-          <TabsTrigger value="channels">{t("tab.channels")}</TabsTrigger>
-          <TabsTrigger value="deliveries">{t("tab.deliveries")}</TabsTrigger>
-        </TabsList>
+              <TabsContent value="channels">
+                <StateBoundary
+                  empty={channels.length === 0}
+                  emptyProps={{
+                    title: tp("emptyTitle"),
+                    reason: tp("empty.notify"),
+                    nextStep: { label: t("addChannel"), onClick: openAdd },
+                  }}
+                >
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    <button
+                      type="button"
+                      onClick={openAdd}
+                      className="text-foreground/70 border-foreground/70 hover:bg-muted/60 hover:shadow-sm flex min-h-[130px] flex-col items-center justify-center gap-2 rounded-xl border border-dashed transition"
+                    >
+                      <PlusIcon className="size-6" />
+                      <span className="text-sm">{t("addChannel")}</span>
+                    </button>
 
-        <TabsContent value="channels">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <button
-              type="button"
-              onClick={openAdd}
-              className="text-foreground/70 border-foreground/70 hover:bg-muted/60 hover:shadow-sm flex min-h-[130px] flex-col items-center justify-center gap-2 rounded-xl border border-dashed transition"
-            >
-              <PlusIcon className="size-6" />
-              <span className="text-sm">{t("addChannel")}</span>
-            </button>
-
-            {channels.map((ch) => (
-              <Card
-                key={ch.id}
-                onClick={() => openEdit(ch)}
-                className="hover:border-primary/60 cursor-pointer gap-3 transition hover:shadow-sm"
-              >
-                <CardHeader>
-                  <div className="flex items-center gap-2">
-                    <BellIcon className="text-muted-foreground size-4 shrink-0" />
-                    <CardTitle className="truncate text-base">{ch.name}</CardTitle>
-                    {/* 卡片整体可点（进入编辑），所以这两个控件必须各自吞掉冒泡，
-                        否则开关/删除会顺带触发编辑。把 stopPropagation 挂在控件自己
-                        身上，而不是套一层 div：套 div 会造出一个「看起来可交互但没有
-                        角色」的静态元素，既触发 a11y 告警，语义上也说不通。 */}
-                    <div className="ml-auto flex items-center gap-2">
-                      <Switch
-                        checked={ch.enabled}
-                        onCheckedChange={() => toggleEnabled(ch)}
-                        onClick={(e) => e.stopPropagation()}
-                        aria-label={t("aria.enable")}
-                      />
-                      <Button
-                        size="icon"
-                        variant="outline"
-                        aria-label={t("aria.delete")}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          // void 显式丢弃 Promise：removeChannel 自己 catch 并 toast，
-                          // 这里不需要 await（onClick 不是 async）。
-                          void removeChannel(ch);
-                        }}
+                    {channels.map((ch) => (
+                      <Card
+                        key={ch.id}
+                        onClick={() => openEdit(ch)}
+                        className="hover:border-primary/60 cursor-pointer gap-3 transition hover:shadow-sm"
                       >
-                        <Trash2Icon className="text-destructive" />
-                      </Button>
-                    </div>
+                        <CardHeader>
+                          <div className="flex items-center gap-2">
+                            <BellIcon className="text-muted-foreground size-4 shrink-0" />
+                            <CardTitle className="truncate text-base">{ch.name}</CardTitle>
+                            {/* 卡片整体可点（进入编辑），所以这两个控件必须各自吞掉冒泡，
+                                否则开关/删除会顺带触发编辑。把 stopPropagation 挂在控件自己
+                                身上，而不是套一层 div：套 div 会造出一个「看起来可交互但没有
+                                角色」的静态元素，既触发 a11y 告警，语义上也说不通。 */}
+                            <div className="ml-auto flex items-center gap-2">
+                              <Switch
+                                checked={ch.enabled}
+                                onCheckedChange={() => toggleEnabled(ch)}
+                                onClick={(e) => e.stopPropagation()}
+                                aria-label={t("aria.enable")}
+                              />
+                              <Button
+                                size="icon"
+                                variant="outline"
+                                aria-label={t("aria.delete")}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  // void 显式丢弃 Promise：removeChannel 自己 catch 并 toast，
+                                  // 这里不需要 await（onClick 不是 async）。
+                                  void removeChannel(ch);
+                                }}
+                              >
+                                <Trash2Icon className="text-destructive" />
+                              </Button>
+                            </div>
+                          </div>
+                        </CardHeader>
+                        <CardContent className="grid gap-3">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant="outline">{kindLabel(ch.kind)}</Badge>
+                            <Badge variant="outline">{ch.mode === "digest" ? t("mode.digest") : t("mode.realtime")}</Badge>
+                            {!ch.enabled && <Badge variant="outline">{t("disabled")}</Badge>}
+                          </div>
+                          <FilterSummary filter={ch.filter} />
+                        </CardContent>
+                      </Card>
+                    ))}
                   </div>
-                </CardHeader>
-                <CardContent className="grid gap-3">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant="outline">{kindLabel(ch.kind)}</Badge>
-                    <Badge variant="outline">{ch.mode === "digest" ? t("mode.digest") : t("mode.realtime")}</Badge>
-                    {!ch.enabled && <Badge variant="outline">{t("disabled")}</Badge>}
-                  </div>
-                  <FilterSummary filter={ch.filter} />
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </TabsContent>
+                </StateBoundary>
+              </TabsContent>
 
-        <TabsContent value="deliveries">
-          <DeliveryList channels={channels} />
-        </TabsContent>
-      </Tabs>
+              <TabsContent value="deliveries">
+                <DeliveryList channels={channels} />
+              </TabsContent>
+            </Tabs>
+          </div>
+        </StateBoundary>
+      </div>
 
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetContent side="right" className="w-full data-[side=right]:sm:max-w-lg">
@@ -602,6 +684,6 @@ export default function NotifyPage() {
           </div>
         </SheetContent>
       </Sheet>
-    </div>
+    </PageShell>
   );
 }

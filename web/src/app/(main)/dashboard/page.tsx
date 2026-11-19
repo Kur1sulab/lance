@@ -17,12 +17,16 @@ import {
 import { useTranslations } from "next-intl";
 import { Bar, BarChart, CartesianGrid, Tooltip as RechartsTooltip, XAxis, YAxis } from "recharts";
 
+import { StateBoundary } from "@/components/data/state-boundary";
+import { PageShell } from "@/components/shell/page-shell";
 import { StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { Progress } from "@/components/ui/progress";
+import { usePermissionDenied } from "@/hooks/use-permission-denied";
 import { api } from "@/lib/api";
+import { errorCodeOf, errorMessageOf } from "@/lib/api-error";
 import type {
   Activity,
   Agent,
@@ -120,6 +124,16 @@ export default function DashboardPage() {
   const tStatus = useTranslations("status");
   const tKind = useTranslations("dashboard.activityKind");
   const tRole = useTranslations("sessions.role");
+  // 壳层：面包屑走 nav，四态文案走 pageStates（文案全部来自 messages，不写死）。
+  const tn = useTranslations("nav");
+  const tp = useTranslations("pageStates");
+  const perm = usePermissionDenied();
+  const lastError = React.useRef<unknown>(null);
+  // 首屏是否已经成功拿到过一轮数据：仪表盘的三条轮询都没有「重新取数」入口，
+  // loading / retry 都只能落在「还没有第一轮数据」这个真实条件上。
+  const [loaded, setLoaded] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const loadedRef = React.useRef(false);
   const rel = (ts?: string | number) => {
     const v = fmtRel(ts);
     return v === null ? "—" : t("ago", { value: v });
@@ -169,8 +183,10 @@ export default function DashboardPage() {
           signature = nextSignature;
           setTasks(tr.tasks);
         }
-      } catch {
-        /* transient errors — next poll retries */
+      } catch (e) {
+        // transient errors — next poll retries. 同时记下错误，供四态判定用。
+        lastError.current = e;
+        perm.check(e);
       } finally {
         loading = false;
       }
@@ -208,8 +224,15 @@ export default function DashboardPage() {
         setActivity(activity.items);
         setTokens(tokens.total ?? null);
         setConvTokens(conversationTokens);
-      } catch {
+        // 首轮成功即视为「已有数据」：之后轮询偶发失败保留旧数据，不闪错误页。
+        loadedRef.current = true;
+        setLoaded(true);
+        setError(null);
+      } catch (e) {
         // Preserve stale data and retry on the next interval.
+        lastError.current = e;
+        perm.check(e);
+        if (!loadedRef.current) setError(errorMessageOf(e));
       } finally {
         loading = false;
       }
@@ -246,8 +269,10 @@ export default function DashboardPage() {
         setTools(toolList);
         setLLMProfiles(profileList);
         setUsageStats(usage);
-      } catch {
-        /* transient errors */
+      } catch (e) {
+        /* transient errors. 同样留给四态判定（例如 403 需要走无权限态）。 */
+        lastError.current = e;
+        perm.check(e);
       }
     };
     void load();
@@ -492,755 +517,826 @@ export default function DashboardPage() {
     return "bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/20";
   }
 
+  // ── 四态判定（全部落在真实条件上，不编造）────────────────────────────────
+  // 首轮没回来、且没报错、也没被判无权限 → 才算 loading（否则骨架屏会盖住错误态/无权限态）。
+  const initialLoading = !loaded && !error && !perm.denied;
+  // 空态 = 首轮已成功 + 任务/发现/资产/流量/动态/待审批全为 0，即「这个平台还没跑过东西」。
+  const dashboardEmpty =
+    loaded &&
+    !error &&
+    !perm.denied &&
+    tasks.length === 0 &&
+    findings.length === 0 &&
+    totalAssets === 0 &&
+    traffic.length === 0 &&
+    recentActivity.length === 0 &&
+    pending.length === 0;
+
+  // 三条轮询都没有「重新取数」入口：重试 = 清掉错误态回到骨架屏，下一轮轮询（≤5s）自会取数。
+  const retry = () => {
+    lastError.current = null;
+    setError(null);
+    setLoaded(false);
+    loadedRef.current = false;
+    perm.reset();
+  };
+
   // ── render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex flex-1 flex-col gap-4 pb-6 md:gap-6">
-      {/* ── Header ── */}
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight">{t("title")}</h1>
-        <p className="text-sm text-muted-foreground">{t("subtitle")}</p>
-      </div>
+    <PageShell
+      title={t("title")}
+      description={t("subtitle")}
+      breadcrumb={[{ label: tn("group.war"), href: "/dashboard" }, { label: tn("item.dashboard") }]}
+    >
+      <div className="px-4 py-3 md:px-6">
+        <StateBoundary
+          loading={initialLoading}
+          error={
+            error
+              ? {
+                  title: tp("errorTitle"),
+                  detail: tp("errorDetail"),
+                  code: errorCodeOf(lastError.current),
+                  codeLabel: tp("errorCodeLabel"),
+                  retryLabel: tp("retry"),
+                }
+              : null
+          }
+          permission={perm.denied ? "dashboard:read" : null}
+          permissionProps={{
+            title: tp("permissionTitle"),
+            detail: tp("permissionDetail", { name: tn("item.dashboard"), ask: tp("askAdmin") }),
+            missingLabel: tp("permissionMissing"),
+            askLabel: tp("permissionAsk"),
+            ask: tp("askAdmin"),
+          }}
+          empty={dashboardEmpty}
+          emptyProps={{ title: tp("emptyTitle"), reason: tp("empty.dashboard") }}
+          skeleton={
+            <div className="flex flex-col gap-4 md:gap-6">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <div key={i} className="h-20 animate-pulse rounded-xl bg-muted" />
+                ))}
+              </div>
+              <div className="grid gap-3 lg:grid-cols-3">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <div key={i} className="h-64 animate-pulse rounded-xl bg-muted" />
+                ))}
+              </div>
+              <div className="grid gap-3 lg:grid-cols-2">
+                {Array.from({ length: 2 }).map((_, i) => (
+                  <div key={i} className="h-56 animate-pulse rounded-xl bg-muted" />
+                ))}
+              </div>
+            </div>
+          }
+          onRetry={retry}
+        >
+          <div className="flex flex-col gap-4 pb-6 md:gap-6">
+            {/* ── Row 1: 5 stat cards ── */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+            {/* 活跃任务 */}
+            <Card className="gap-1">
+              <CardHeader className="pb-0">
+                <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                  <TargetIcon className="size-3" /> {t("activeTasks")}
+                </div>
+                <div className="flex items-baseline gap-1.5">
+                  <span className="text-2xl font-semibold tabular-nums">{tasksByStatus.running ?? 0}</span>
+                  <span className="text-xs text-muted-foreground">/ {tasks.length}</span>
+                </div>
+              </CardHeader>
+              <CardContent className="flex flex-wrap gap-x-2.5 gap-y-0.5 text-[10px]">
+                {(tasksByStatus.running ?? 0) > 0 && (
+                  <span className="text-blue-700 dark:text-blue-400">
+                    {t("statExplore")} {tasksByStatus.running}
+                  </span>
+                )}
+                {(tasksByStatus.paused ?? 0) > 0 && (
+                  <span className="text-amber-700 dark:text-amber-400">
+                    {t("statPaused")} {tasksByStatus.paused}
+                  </span>
+                )}
+                {(tasksByStatus.done ?? 0) > 0 && (
+                  <span className="text-emerald-700 dark:text-emerald-400">
+                    {t("statDone")} {tasksByStatus.done}
+                  </span>
+                )}
+                {tasks.length === 0 && <span className="text-muted-foreground">{t("noTasks")}</span>}
+              </CardContent>
+            </Card>
 
-      {/* ── Row 1: 5 stat cards ── */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-        {/* 活跃任务 */}
-        <Card className="gap-1">
-          <CardHeader className="pb-0">
-            <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-              <TargetIcon className="size-3" /> {t("activeTasks")}
-            </div>
-            <div className="flex items-baseline gap-1.5">
-              <span className="text-2xl font-semibold tabular-nums">{tasksByStatus.running ?? 0}</span>
-              <span className="text-xs text-muted-foreground">/ {tasks.length}</span>
-            </div>
-          </CardHeader>
-          <CardContent className="flex flex-wrap gap-x-2.5 gap-y-0.5 text-[10px]">
-            {(tasksByStatus.running ?? 0) > 0 && (
-              <span className="text-blue-700 dark:text-blue-400">
-                {t("statExplore")} {tasksByStatus.running}
-              </span>
-            )}
-            {(tasksByStatus.paused ?? 0) > 0 && (
-              <span className="text-amber-700 dark:text-amber-400">
-                {t("statPaused")} {tasksByStatus.paused}
-              </span>
-            )}
-            {(tasksByStatus.done ?? 0) > 0 && (
-              <span className="text-emerald-700 dark:text-emerald-400">
-                {t("statDone")} {tasksByStatus.done}
-              </span>
-            )}
-            {tasks.length === 0 && <span className="text-muted-foreground">{t("noTasks")}</span>}
-          </CardContent>
-        </Card>
+            {/* 确认发现 */}
+            <Card className="gap-1">
+              <CardHeader className="pb-0">
+                <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                  <BugIcon className="size-3" /> {t("confirmedFindings")}
+                </div>
+                <div className="text-2xl font-semibold tabular-nums">{findings.length}</div>
+              </CardHeader>
+              <CardContent className="flex flex-wrap gap-2.5 text-[10px]">
+                <span className="text-rose-700 dark:text-rose-500">
+                  {tStatus("severity.critical")} {findingsBySev.critical}
+                </span>
+                <span className="text-red-700 dark:text-red-400">
+                  {tStatus("severity.high")} {findingsBySev.high}
+                </span>
+                <span className="text-amber-700 dark:text-amber-400">
+                  {tStatus("severity.medium")} {findingsBySev.medium}
+                </span>
+                <span className="text-slate-400">
+                  {tStatus("severity.low")} {findingsBySev.low}
+                </span>
+              </CardContent>
+            </Card>
 
-        {/* 确认发现 */}
-        <Card className="gap-1">
-          <CardHeader className="pb-0">
-            <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-              <BugIcon className="size-3" /> {t("confirmedFindings")}
-            </div>
-            <div className="text-2xl font-semibold tabular-nums">{findings.length}</div>
-          </CardHeader>
-          <CardContent className="flex flex-wrap gap-2.5 text-[10px]">
-            <span className="text-rose-700 dark:text-rose-500">
-              {tStatus("severity.critical")} {findingsBySev.critical}
-            </span>
-            <span className="text-red-700 dark:text-red-400">
-              {tStatus("severity.high")} {findingsBySev.high}
-            </span>
-            <span className="text-amber-700 dark:text-amber-400">
-              {tStatus("severity.medium")} {findingsBySev.medium}
-            </span>
-            <span className="text-slate-400">
-              {tStatus("severity.low")} {findingsBySev.low}
-            </span>
-          </CardContent>
-        </Card>
+            {/* 资产节点 */}
+            <Card className="gap-1">
+              <CardHeader className="pb-0">
+                <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                  <NetworkIcon className="size-3" /> {t("assetNodes")}
+                </div>
+                <div className="text-2xl font-semibold tabular-nums">{totalAssets}</div>
+              </CardHeader>
+              <CardContent className="text-[10px] text-muted-foreground">{t("crossTaskShared")}</CardContent>
+            </Card>
 
-        {/* 资产节点 */}
-        <Card className="gap-1">
-          <CardHeader className="pb-0">
-            <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-              <NetworkIcon className="size-3" /> {t("assetNodes")}
-            </div>
-            <div className="text-2xl font-semibold tabular-nums">{totalAssets}</div>
-          </CardHeader>
-          <CardContent className="text-[10px] text-muted-foreground">{t("crossTaskShared")}</CardContent>
-        </Card>
+            {/* 流量交互 */}
+            <Card className="gap-1">
+              <CardHeader className="pb-0">
+                <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                  <ActivityIcon className="size-3" /> {t("trafficExchanges")}
+                </div>
+                <div className="text-2xl font-semibold tabular-nums">{traffic.length}</div>
+              </CardHeader>
+              <CardContent className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                {settings?.traffic_capture ? (
+                  <>
+                    <LiveDot />
+                    <span>{t("recording")}</span>
+                  </>
+                ) : (
+                  <span>{t("captureOff")}</span>
+                )}
+              </CardContent>
+            </Card>
 
-        {/* 流量交互 */}
-        <Card className="gap-1">
-          <CardHeader className="pb-0">
-            <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-              <ActivityIcon className="size-3" /> {t("trafficExchanges")}
-            </div>
-            <div className="text-2xl font-semibold tabular-nums">{traffic.length}</div>
-          </CardHeader>
-          <CardContent className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-            {settings?.traffic_capture ? (
-              <>
-                <LiveDot />
-                <span>{t("recording")}</span>
-              </>
-            ) : (
-              <span>{t("captureOff")}</span>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* LLM 用量 */}
-        <Card className="gap-1">
-          <CardHeader className="pb-0">
-            <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-              <ZapIcon className="size-3" /> {t("tokenUsage")}
-            </div>
-            <div className="text-2xl font-semibold tabular-nums">
-              {fmtTokens(displayedTokens.input + displayedTokens.output) || "—"}
-            </div>
-          </CardHeader>
-          <CardContent className="text-[10px] text-muted-foreground">
-            {t("statTokenDetail", {
-              input: fmtTokens(displayedTokens.input),
-              cache: fmtTokens(displayedTokens.cacheRead),
-              output: fmtTokens(displayedTokens.output),
-            })}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* ── Row 2: LLM Token 消耗 ── */}
-      <Card className="p-4">
-        {/* Header */}
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-1.5 text-xs font-semibold">
-            <ZapIcon className="size-3.5 text-muted-foreground" />
-            {t("tokenConsumption")}
-            {/* 数据源开关：旧版=activity 统计（含历史任务），新版=llm_usage 计量账本（更准，仅覆盖启用后） */}
-            <div className="ml-1 flex gap-0.5 rounded-md border bg-muted/30 p-0.5">
-              {(
-                [
-                  { v: "old", label: t("verOld") },
-                  { v: "new", label: t("verNew") },
-                ] as const
-              ).map(({ v, label }) => (
-                <button
-                  type="button"
-                  key={v}
-                  onClick={() => setTokenVersion(v)}
-                  title={v === "new" ? t("tooltipNew") : t("tooltipOld")}
-                  className={cn(
-                    "rounded px-2 py-0.5 text-[10px] font-medium transition-colors",
-                    tokenVersion === v
-                      ? "bg-background text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <span className="text-[10px] font-normal text-muted-foreground">
-              {tokenVersion === "new" ? t("srcNew") : t("srcOld")}
-            </span>
+            {/* LLM 用量 */}
+            <Card className="gap-1">
+              <CardHeader className="pb-0">
+                <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                  <ZapIcon className="size-3" /> {t("tokenUsage")}
+                </div>
+                <div className="text-2xl font-semibold tabular-nums">
+                  {fmtTokens(displayedTokens.input + displayedTokens.output) || "—"}
+                </div>
+              </CardHeader>
+              <CardContent className="text-[10px] text-muted-foreground">
+                {t("statTokenDetail", {
+                  input: fmtTokens(displayedTokens.input),
+                  cache: fmtTokens(displayedTokens.cacheRead),
+                  output: fmtTokens(displayedTokens.output),
+                })}
+              </CardContent>
+            </Card>
           </div>
-          {/* Profile tabs */}
-          <div className="flex flex-wrap items-center gap-1">
-            <button
-              type="button"
-              onClick={() => setTokenTab("all")}
-              className={cn(
-                "rounded-md px-2.5 py-1 text-[10px] font-medium transition-colors",
-                tokenTab === "all"
-                  ? "bg-foreground text-background"
-                  : "bg-muted/30 text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {t("all")}
-            </button>
-            {llmProfiles.map((p) => {
-              const key = Number(p.id);
-              const hasData = tokenByProfile.has(key) || (p.is_default && tokenByProfile.has(defaultProfileId));
-              const resolvedKey = tokenByProfile.has(key) ? key : p.is_default ? defaultProfileId : key;
-              return (
-                <button
-                  type="button"
-                  key={p.id}
-                  onClick={() => setTokenTab(resolvedKey)}
-                  className={cn(
-                    "flex items-center gap-1 rounded-md px-2.5 py-1 text-[10px] font-medium transition-colors",
-                    tokenTab === resolvedKey
-                      ? "bg-foreground text-background"
-                      : "bg-muted/30 text-muted-foreground hover:text-foreground",
-                    // 无数据时用「描边」而不是「压透明度」：opacity-40 会把文字对比度压到 1.9:1，
-                    // 既违反 WCAG 又让人看不清这个 profile 叫什么。
-                    !hasData && "bg-transparent text-muted-foreground ring-1 ring-inset ring-border/60",
-                  )}
-                >
-                  {p.name}
-                  {p.is_default && (
-                    <span
+
+          {/* ── Row 2: LLM Token 消耗 ── */}
+          <Card className="p-4">
+            {/* Header */}
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 text-xs font-semibold">
+                <ZapIcon className="size-3.5 text-muted-foreground" />
+                {t("tokenConsumption")}
+                {/* 数据源开关：旧版=activity 统计（含历史任务），新版=llm_usage 计量账本（更准，仅覆盖启用后） */}
+                <div className="ml-1 flex gap-0.5 rounded-md border bg-muted/30 p-0.5">
+                  {(
+                    [
+                      { v: "old", label: t("verOld") },
+                      { v: "new", label: t("verNew") },
+                    ] as const
+                  ).map(({ v, label }) => (
+                    <button
+                      type="button"
+                      key={v}
+                      onClick={() => setTokenVersion(v)}
+                      title={v === "new" ? t("tooltipNew") : t("tooltipOld")}
                       className={cn(
-                        "rounded px-1 py-0 text-[10px]",
-                        tokenTab === resolvedKey
-                          ? "bg-background/20 text-background"
-                          : "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
+                        "rounded px-2 py-0.5 text-[10px] font-medium transition-colors",
+                        tokenVersion === v
+                          ? "bg-background text-foreground shadow-sm"
+                          : "text-muted-foreground hover:text-foreground",
                       )}
                     >
-                      {t("default")}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Body: metrics left + bar chart right */}
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[220px_1fr]">
-          {/* Left: key metrics */}
-          <div className="flex flex-col gap-4">
-            {/* Total */}
-            <div>
-              <div className="text-[10px] text-muted-foreground">{t("totalInOut")}</div>
-              <div className="mt-0.5 text-3xl font-bold tabular-nums tracking-tight">
-                {fmtTokens(displayedTokens.input + displayedTokens.output) || "—"}
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <span className="text-[10px] font-normal text-muted-foreground">
+                  {tokenVersion === "new" ? t("srcNew") : t("srcOld")}
+                </span>
               </div>
-              <div className="mt-0.5 text-[10px] text-muted-foreground">
-                {t("taskCount", { count: displayedTokens.taskCount })}
+              {/* Profile tabs */}
+              <div className="flex flex-wrap items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setTokenTab("all")}
+                  className={cn(
+                    "rounded-md px-2.5 py-1 text-[10px] font-medium transition-colors",
+                    tokenTab === "all"
+                      ? "bg-foreground text-background"
+                      : "bg-muted/30 text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {t("all")}
+                </button>
+                {llmProfiles.map((p) => {
+                  const key = Number(p.id);
+                  const hasData = tokenByProfile.has(key) || (p.is_default && tokenByProfile.has(defaultProfileId));
+                  const resolvedKey = tokenByProfile.has(key) ? key : p.is_default ? defaultProfileId : key;
+                  return (
+                    <button
+                      type="button"
+                      key={p.id}
+                      onClick={() => setTokenTab(resolvedKey)}
+                      className={cn(
+                        "flex items-center gap-1 rounded-md px-2.5 py-1 text-[10px] font-medium transition-colors",
+                        tokenTab === resolvedKey
+                          ? "bg-foreground text-background"
+                          : "bg-muted/30 text-muted-foreground hover:text-foreground",
+                        // 无数据时用「描边」而不是「压透明度」：opacity-40 会把文字对比度压到 1.9:1，
+                        // 既违反 WCAG 又让人看不清这个 profile 叫什么。
+                        !hasData && "bg-transparent text-muted-foreground ring-1 ring-inset ring-border/60",
+                      )}
+                    >
+                      {p.name}
+                      {p.is_default && (
+                        <span
+                          className={cn(
+                            "rounded px-1 py-0 text-[10px]",
+                            tokenTab === resolvedKey
+                              ? "bg-background/20 text-background"
+                              : "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
+                          )}
+                        >
+                          {t("default")}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
-            {/* Per-type bars */}
-            <div className="space-y-3">
-              {(() => {
-                // input 已含缓存；拆成不重叠三段：未命中输入 + 缓存命中 + 输出 = 总量。
-                const total = displayedTokens.input + displayedTokens.output;
-                return [
-                  {
-                    label: t("inputUncached"),
-                    value: displayedTokens.input - displayedTokens.cacheRead,
-                    barColor: dailyTrendConfig.input.color!,
-                    text: "text-blue-700 dark:text-blue-400",
-                  },
-                  {
-                    label: t("cacheHit"),
-                    value: displayedTokens.cacheRead,
-                    barColor: dailyTrendConfig.cacheRead.color!,
-                    text: "text-emerald-700 dark:text-emerald-400",
-                  },
-                  {
-                    label: t("output"),
-                    value: displayedTokens.output,
-                    barColor: dailyTrendConfig.output.color!,
-                    text: "text-violet-700 dark:text-violet-400",
-                  },
-                ].map(({ label, value, barColor, text }) => {
-                  const pct = total > 0 ? (value / total) * 100 : 0;
+            {/* Body: metrics left + bar chart right */}
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-[220px_1fr]">
+              {/* Left: key metrics */}
+              <div className="flex flex-col gap-4">
+                {/* Total */}
+                <div>
+                  <div className="text-[10px] text-muted-foreground">{t("totalInOut")}</div>
+                  <div className="mt-0.5 text-3xl font-bold tabular-nums tracking-tight">
+                    {fmtTokens(displayedTokens.input + displayedTokens.output) || "—"}
+                  </div>
+                  <div className="mt-0.5 text-[10px] text-muted-foreground">
+                    {t("taskCount", { count: displayedTokens.taskCount })}
+                  </div>
+                </div>
+
+                {/* Per-type bars */}
+                <div className="space-y-3">
+                  {(() => {
+                    // input 已含缓存；拆成不重叠三段：未命中输入 + 缓存命中 + 输出 = 总量。
+                    const total = displayedTokens.input + displayedTokens.output;
+                    return [
+                      {
+                        label: t("inputUncached"),
+                        value: displayedTokens.input - displayedTokens.cacheRead,
+                        barColor: dailyTrendConfig.input.color!,
+                        text: "text-blue-700 dark:text-blue-400",
+                      },
+                      {
+                        label: t("cacheHit"),
+                        value: displayedTokens.cacheRead,
+                        barColor: dailyTrendConfig.cacheRead.color!,
+                        text: "text-emerald-700 dark:text-emerald-400",
+                      },
+                      {
+                        label: t("output"),
+                        value: displayedTokens.output,
+                        barColor: dailyTrendConfig.output.color!,
+                        text: "text-violet-700 dark:text-violet-400",
+                      },
+                    ].map(({ label, value, barColor, text }) => {
+                      const pct = total > 0 ? (value / total) * 100 : 0;
+                      return (
+                        <div key={label}>
+                          <div className="mb-1 flex items-center justify-between text-[10px]">
+                            <span className="text-muted-foreground">{label}</span>
+                            <span className={cn("font-mono font-semibold tabular-nums", text)}>{fmtTokens(value)}</span>
+                          </div>
+                          <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                            <div
+                              className="h-full rounded-full transition-all duration-500"
+                              style={{ width: `${pct}%`, background: barColor }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+
+                {/* Cache hit rate */}
+                {(() => {
+                  // input 已含缓存 → 命中率 = 缓存命中 / 总输入。
+                  const denominator = displayedTokens.input;
+                  const hitPct = denominator > 0 ? Math.round((displayedTokens.cacheRead / denominator) * 100) : 0;
                   return (
-                    <div key={label}>
-                      <div className="mb-1 flex items-center justify-between text-[10px]">
-                        <span className="text-muted-foreground">{label}</span>
-                        <span className={cn("font-mono font-semibold tabular-nums", text)}>{fmtTokens(value)}</span>
-                      </div>
-                      <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-                        <div
-                          className="h-full rounded-full transition-all duration-500"
-                          style={{ width: `${pct}%`, background: barColor }}
-                        />
-                      </div>
+                    <div className="flex items-center justify-between rounded-lg border bg-muted/20 px-3 py-2 text-[10px]">
+                      <span className="text-muted-foreground">{t("cacheHitRate")}</span>
+                      <span
+                        className={cn("font-semibold tabular-nums", hitPct > 50 ? "text-emerald-700 dark:text-emerald-400" : "text-amber-700 dark:text-amber-400")}
+                      >
+                        {hitPct}%
+                      </span>
                     </div>
                   );
-                });
-              })()}
-            </div>
-
-            {/* Cache hit rate */}
-            {(() => {
-              // input 已含缓存 → 命中率 = 缓存命中 / 总输入。
-              const denominator = displayedTokens.input;
-              const hitPct = denominator > 0 ? Math.round((displayedTokens.cacheRead / denominator) * 100) : 0;
-              return (
-                <div className="flex items-center justify-between rounded-lg border bg-muted/20 px-3 py-2 text-[10px]">
-                  <span className="text-muted-foreground">{t("cacheHitRate")}</span>
-                  <span
-                    className={cn("font-semibold tabular-nums", hitPct > 50 ? "text-emerald-700 dark:text-emerald-400" : "text-amber-700 dark:text-amber-400")}
-                  >
-                    {hitPct}%
-                  </span>
-                </div>
-              );
-            })()}
-          </div>
-
-          {/* Right: daily bar chart */}
-          <div className="flex min-h-0 flex-col">
-            <div className="mb-2 flex items-center justify-between">
-              <div className="flex gap-3 text-[10px] text-muted-foreground">
-                {(["input", "output", "cacheRead"] as const).map((k) => (
-                  <span key={k} className="flex items-center gap-1">
-                    <span
-                      className="inline-block size-2 rounded-sm"
-                      style={{ background: dailyTrendConfig[k].color }}
-                    />
-                    {dailyTrendConfig[k].label}
-                  </span>
-                ))}
-              </div>
-              <div className="flex gap-0.5 rounded-md border bg-muted/30 p-0.5">
-                {(
-                  [
-                    { days: 7, label: t("range7") },
-                    { days: 30, label: t("range30") },
-                    { days: 90, label: t("range90") },
-                    { days: 180, label: t("range180") },
-                    { days: 365, label: t("range365") },
-                  ] as const
-                ).map(({ days, label }) => (
-                  <button
-                    type="button"
-                    key={days}
-                    onClick={() => setTokenDays(days)}
-                    className={cn(
-                      "rounded px-2.5 py-0.5 text-[10px] font-medium transition-colors",
-                      tokenDays === days
-                        ? "bg-background text-foreground shadow-sm"
-                        : "text-muted-foreground hover:text-foreground",
-                    )}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {dailyTokenData.length === 0 ? (
-              <div
-                className="flex flex-1 items-center justify-center rounded-lg border bg-muted/10 text-xs text-muted-foreground"
-                style={{ minHeight: 180 }}
-              >
-                {t("noData")}
-              </div>
-            ) : (
-              <ChartContainer config={dailyTrendConfig} className="h-[200px] w-full">
-                <BarChart data={dailyTokenData} margin={{ top: 4, right: 4, bottom: 0, left: 0 }} maxBarSize={40}>
-                  <CartesianGrid vertical={false} />
-                  <XAxis
-                    dataKey="date"
-                    tickLine={false}
-                    axisLine={false}
-                    tick={{ fontSize: 10 }}
-                    tickMargin={6}
-                    interval="preserveStartEnd"
-                  />
-                  <YAxis
-                    tickFormatter={(v) => fmtTokens(Number(v))}
-                    tickLine={false}
-                    axisLine={false}
-                    tick={{ fontSize: 10 }}
-                    width={44}
-                  />
-                  <ChartTooltip
-                    cursor={false}
-                    content={
-                      <ChartTooltipContent
-                        indicator="line"
-                        formatter={(value, name) => (
-                          <div className="flex w-full items-center justify-between gap-4">
-                            <span>
-                              {(dailyTrendConfig as Record<string, { label: string }>)[String(name)]?.label ??
-                                String(name)}
-                            </span>
-                            <span className="font-mono font-semibold tabular-nums">{fmtTokens(Number(value))}</span>
-                          </div>
-                        )}
-                      />
-                    }
-                  />
-                  <Bar dataKey="input" stackId="1" fill="var(--color-input)" radius={[0, 0, 0, 0]} />
-                  <Bar dataKey="output" stackId="1" fill="var(--color-output)" radius={[0, 0, 0, 0]} />
-                  <Bar dataKey="cacheRead" stackId="1" fill="var(--color-cacheRead)" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ChartContainer>
-            )}
-          </div>
-        </div>
-      </Card>
-
-      {/* ── Row 3: 活动流 | 发现 ── */}
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        {/* 活动流 */}
-        <Card className="p-4">
-          <div className="mb-3 flex items-center justify-between">
-            <div className="flex items-center gap-1.5 text-xs font-semibold">
-              <ActivityIcon className="size-3.5 text-muted-foreground" />
-              {t("activityStream")}
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] text-muted-foreground">
-                {t("eventCount", { count: activity.filter((a) => a.kind !== "usage").length })}
-              </span>
-              <Link
-                href="/function/tasks"
-                className="flex items-center gap-0.5 text-[10px] text-muted-foreground hover:text-foreground"
-              >
-                {t("viewTasks")} <ArrowUpRightIcon className="size-3" />
-              </Link>
-            </div>
-          </div>
-
-          <div className="mb-2.5 flex flex-wrap gap-1.5">
-            {(["tool_use", "tool_result", "text", "thinking", "result"] as const).map((kind) => {
-              const count = activity.filter((a) => a.kind === kind).length;
-              if (count === 0) return null;
-              return (
-                <span key={kind} className="rounded border bg-muted/20 px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                  {tKind.has(kind) ? tKind(kind) : kind} <strong className="text-foreground">{count}</strong>
-                </span>
-              );
-            })}
-          </div>
-
-          <div className="divide-y">
-            {recentActivity.length === 0 ? (
-              <div className="py-4 text-center text-xs text-muted-foreground">{t("noActivity")}</div>
-            ) : (
-              recentActivity.map((a) => (
-                <div key={a.seq} className="flex gap-2.5 py-2">
-                  <span
-                    className={cn(
-                      "shrink-0 self-start rounded border px-1.5 py-0.5 font-mono text-[10px]",
-                      workerBg(a.worker),
-                    )}
-                  >
-                    {tRole.has(a.worker) ? tRole(a.worker) : a.worker}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[11px] font-medium">{kindLabel(a)}</div>
-                    <div className="mt-0.5 truncate text-[10px] text-muted-foreground">{a.summary}</div>
-                  </div>
-                  <div className="shrink-0 text-right">
-                    <Badge variant="outline" className="px-1.5 py-0 text-[10px] text-muted-foreground">
-                      {tKind.has(a.kind) ? tKind(a.kind) : a.kind}
-                    </Badge>
-                    <div className="mt-0.5 text-[10px] tabular-nums text-muted-foreground">{rel(a.ts)}</div>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </Card>
-
-        {/* 发现 */}
-        <Card className="p-4">
-          <div className="mb-3 flex items-center justify-between">
-            <div className="flex items-center gap-1.5 text-xs font-semibold">
-              <BugIcon className="size-3.5 text-muted-foreground" />
-              {t("findings")}
-            </div>
-            <Link
-              href="/function/findings"
-              className="flex items-center gap-0.5 text-[10px] text-muted-foreground hover:text-foreground"
-            >
-              {t("all")} <ArrowUpRightIcon className="size-3" />
-            </Link>
-          </div>
-
-          <div className="divide-y">
-            {recentFindings.length === 0 ? (
-              <div className="py-4 text-center text-xs text-muted-foreground">{t("noFindings")}</div>
-            ) : (
-              recentFindings.map((f) => (
-                <div key={f.id} className="flex items-start gap-2 py-2">
-                  <StatusBadge
-                    domain="severity"
-                    value={f.severity}
-                    className="mt-0.5 shrink-0 px-1.5 py-0 text-[10px]"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="text-[11px] font-semibold">{f.vulnclass}</span>
-                      {f.task_description && (
-                        <span className="truncate text-[10px] text-muted-foreground">{f.task_description}</span>
-                      )}
-                    </div>
-                    <div className="mt-0.5 line-clamp-2 text-[10px] leading-snug text-muted-foreground">
-                      {f.summary}
-                    </div>
-                  </div>
-                  <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">{rel(f.ts)}</span>
-                </div>
-              ))
-            )}
-          </div>
-        </Card>
-      </div>
-
-      {/* ── Row 4: 任务表格 ── */}
-      <Card className="overflow-hidden p-0">
-        <div className="flex items-center justify-between border-b px-4 py-3">
-          <div className="flex items-center gap-1.5 text-xs font-semibold">
-            <ClockIcon className="size-3.5 text-muted-foreground" />
-            {t("tasks")}
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-muted-foreground">{t("taskCount", { count: tasks.length })}</span>
-            <Link
-              href="/function/tasks"
-              className="flex items-center gap-0.5 text-[10px] text-muted-foreground hover:text-foreground"
-            >
-              {t("all")} <ArrowUpRightIcon className="size-3" />
-            </Link>
-          </div>
-        </div>
-        <table className="w-full border-collapse text-xs">
-          <thead>
-            <tr className="border-b">
-              {[
-                t("colTask"),
-                t("colStatus"),
-                t("colEngine"),
-                t("colGoalProgress"),
-                t("colInFlight"),
-                t("colLastActivity"),
-              ].map((h) => (
-                <th
-                  key={h}
-                  className="px-4 py-2 text-left text-[10px] font-semibold uppercase tracking-widest text-muted-foreground first:pl-4"
-                >
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {sortedTasks.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="px-4 py-6 text-center text-xs text-muted-foreground">
-                  {t("noTasks")}
-                </td>
-              </tr>
-            ) : (
-              sortedTasks.map((t) => {
-                const goalsPct = t.goals_total ? Math.round(((t.goals_met ?? 0) / t.goals_total) * 100) : null;
-                return (
-                  <tr key={t.id} className="border-b last:border-0 transition-colors hover:bg-muted/30">
-                    <td className="max-w-xs px-4 py-3">
-                      <Link href={`/function/tasks/detail?id=${t.id}`} className="group flex flex-col">
-                        <span className="truncate font-medium group-hover:underline">{t.description}</span>
-                        <span className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">{t.id}</span>
-                      </Link>
-                    </td>
-                    <td className="px-4 py-3">
-                      <StatusBadge domain="task" value={t.status} dot className="px-1.5 py-0 text-[10px]" />
-                    </td>
-                    <td className="px-4 py-3">
-                      <StatusBadge
-                        domain="engine"
-                        value={t.engine_mode ?? "idle"}
-                        className="px-1.5 py-0 text-[10px]"
-                      />
-                    </td>
-                    <td className="px-4 py-3">
-                      {goalsPct !== null ? (
-                        <div className="flex items-center gap-2">
-                          <Progress value={goalsPct} className="h-1 w-14" />
-                          <span className="tabular-nums text-muted-foreground">
-                            {t.goals_met ?? 0}/{t.goals_total}
-                          </span>
-                        </div>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 tabular-nums">
-                      {(t.in_flight ?? 0) > 0 ? (
-                        <span className="font-semibold">{t.in_flight}</span>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 tabular-nums text-muted-foreground">
-                      {rel(t.last_activity_unix ?? t.created_unix)}
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </Card>
-
-      {/* ── Row 5: 资产分布 | 流量状态码 | 拦截 & 待审批 ── */}
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-        {/* 资产分布 */}
-        <Card className="p-4">
-          <SectionTitle icon={NetworkIcon} sub={t("byType")}>
-            {t("assetDistribution")}
-          </SectionTitle>
-
-          {assetByType.length === 0 ? (
-            <div className="py-6 text-center text-xs text-muted-foreground">{t("noAssetData")}</div>
-          ) : (
-            <div className="flex flex-col gap-2">
-              {assetByType.map(([type, count]) => (
-                <div key={type} className="flex items-center gap-2 text-xs">
-                  <span className="w-8 shrink-0 text-right text-[10px] text-muted-foreground">
-                    {t.has(`assetType.${type}`) ? t(`assetType.${type}`) : type}
-                  </span>
-                  <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
-                    <div
-                      className={cn("h-full rounded-full", ASSET_COLORS[type] ?? "bg-slate-400")}
-                      style={{ width: `${(count / assetMax) * 100}%` }}
-                    />
-                  </div>
-                  <span className="w-4 text-right tabular-nums">{count}</span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div className="mt-3 border-t pt-3 text-[10px] text-muted-foreground">
-            {t("totalNodes", { count: totalAssets })}
-          </div>
-        </Card>
-
-        {/* 流量状态码 */}
-        <Card className="p-4">
-          <SectionTitle icon={ActivityIcon} sub={t("requestCount", { count: traffic.length })}>
-            {t("trafficStatusCodes")}
-          </SectionTitle>
-
-          {/* bar chart */}
-          {trafficByCodes.length === 0 ? (
-            <div className="py-6 text-center text-xs text-muted-foreground">{t("noTrafficData")}</div>
-          ) : (
-            <>
-              <div className="mb-3 flex items-end gap-2" style={{ height: 52 }}>
-                {trafficByCodes.map(({ code, n }) => (
-                  <div key={code} className="flex flex-1 flex-col items-center gap-1">
-                    <span className="text-[10px] tabular-nums text-muted-foreground">{n}</span>
-                    <div
-                      className={cn("w-full min-h-1 rounded-sm", statusBg(code), "opacity-80")}
-                      style={{ height: Math.max(4, (n / trafficMax) * 36) }}
-                    />
-                    <span className={cn("text-[10px] font-mono", statusColor(code))}>{code}</span>
-                  </div>
-                ))}
+                })()}
               </div>
 
-              <div className="border-t pt-2.5">
-                <div className="mb-1.5 text-[10px] text-muted-foreground">{t("recentRequests")}</div>
-                <div className="flex flex-col gap-1.5">
-                  {recentTraffic.map((e) => (
-                    <div key={e.id} className="flex items-center gap-1.5 text-[10px]">
-                      <span
+              {/* Right: daily bar chart */}
+              <div className="flex min-h-0 flex-col">
+                <div className="mb-2 flex items-center justify-between">
+                  <div className="flex gap-3 text-[10px] text-muted-foreground">
+                    {(["input", "output", "cacheRead"] as const).map((k) => (
+                      <span key={k} className="flex items-center gap-1">
+                        <span
+                          className="inline-block size-2 rounded-sm"
+                          style={{ background: dailyTrendConfig[k].color }}
+                        />
+                        {dailyTrendConfig[k].label}
+                      </span>
+                    ))}
+                  </div>
+                  <div className="flex gap-0.5 rounded-md border bg-muted/30 p-0.5">
+                    {(
+                      [
+                        { days: 7, label: t("range7") },
+                        { days: 30, label: t("range30") },
+                        { days: 90, label: t("range90") },
+                        { days: 180, label: t("range180") },
+                        { days: 365, label: t("range365") },
+                      ] as const
+                    ).map(({ days, label }) => (
+                      <button
+                        type="button"
+                        key={days}
+                        onClick={() => setTokenDays(days)}
                         className={cn(
-                          "shrink-0 rounded border px-1 py-0 font-mono text-[10px]",
-                          e.method === "GET"
-                            ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                            : "border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-400",
+                          "rounded px-2.5 py-0.5 text-[10px] font-medium transition-colors",
+                          tokenDays === days
+                            ? "bg-background text-foreground shadow-sm"
+                            : "text-muted-foreground hover:text-foreground",
                         )}
                       >
-                        {e.method}
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {dailyTokenData.length === 0 ? (
+                  <div
+                    className="flex flex-1 items-center justify-center rounded-lg border bg-muted/10 text-xs text-muted-foreground"
+                    style={{ minHeight: 180 }}
+                  >
+                    {t("noData")}
+                  </div>
+                ) : (
+                  <ChartContainer config={dailyTrendConfig} className="h-[200px] w-full">
+                    <BarChart data={dailyTokenData} margin={{ top: 4, right: 4, bottom: 0, left: 0 }} maxBarSize={40}>
+                      <CartesianGrid vertical={false} />
+                      <XAxis
+                        dataKey="date"
+                        tickLine={false}
+                        axisLine={false}
+                        tick={{ fontSize: 10 }}
+                        tickMargin={6}
+                        interval="preserveStartEnd"
+                      />
+                      <YAxis
+                        tickFormatter={(v) => fmtTokens(Number(v))}
+                        tickLine={false}
+                        axisLine={false}
+                        tick={{ fontSize: 10 }}
+                        width={44}
+                      />
+                      <ChartTooltip
+                        cursor={false}
+                        content={
+                          <ChartTooltipContent
+                            indicator="line"
+                            formatter={(value, name) => (
+                              <div className="flex w-full items-center justify-between gap-4">
+                                <span>
+                                  {(dailyTrendConfig as Record<string, { label: string }>)[String(name)]?.label ??
+                                    String(name)}
+                                </span>
+                                <span className="font-mono font-semibold tabular-nums">{fmtTokens(Number(value))}</span>
+                              </div>
+                            )}
+                          />
+                        }
+                      />
+                      <Bar dataKey="input" stackId="1" fill="var(--color-input)" radius={[0, 0, 0, 0]} />
+                      <Bar dataKey="output" stackId="1" fill="var(--color-output)" radius={[0, 0, 0, 0]} />
+                      <Bar dataKey="cacheRead" stackId="1" fill="var(--color-cacheRead)" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ChartContainer>
+                )}
+              </div>
+            </div>
+          </Card>
+
+          {/* ── Row 3: 活动流 | 发现 ── */}
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            {/* 活动流 */}
+            <Card className="p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-xs font-semibold">
+                  <ActivityIcon className="size-3.5 text-muted-foreground" />
+                  {t("activityStream")}
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-muted-foreground">
+                    {t("eventCount", { count: activity.filter((a) => a.kind !== "usage").length })}
+                  </span>
+                  <Link
+                    href="/function/tasks"
+                    className="flex items-center gap-0.5 text-[10px] text-muted-foreground hover:text-foreground"
+                  >
+                    {t("viewTasks")} <ArrowUpRightIcon className="size-3" />
+                  </Link>
+                </div>
+              </div>
+
+              <div className="mb-2.5 flex flex-wrap gap-1.5">
+                {(["tool_use", "tool_result", "text", "thinking", "result"] as const).map((kind) => {
+                  const count = activity.filter((a) => a.kind === kind).length;
+                  if (count === 0) return null;
+                  return (
+                    <span key={kind} className="rounded border bg-muted/20 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                      {tKind.has(kind) ? tKind(kind) : kind} <strong className="text-foreground">{count}</strong>
+                    </span>
+                  );
+                })}
+              </div>
+
+              <div className="divide-y">
+                {recentActivity.length === 0 ? (
+                  <div className="py-4 text-center text-xs text-muted-foreground">{t("noActivity")}</div>
+                ) : (
+                  recentActivity.map((a) => (
+                    <div key={a.seq} className="flex gap-2.5 py-2">
+                      <span
+                        className={cn(
+                          "shrink-0 self-start rounded border px-1.5 py-0.5 font-mono text-[10px]",
+                          workerBg(a.worker),
+                        )}
+                      >
+                        {tRole.has(a.worker) ? tRole(a.worker) : a.worker}
                       </span>
-                      <span className="min-w-0 flex-1 truncate text-muted-foreground">
-                        {e.host}
-                        {e.url.replace(/^https?:\/\/[^/]+/, "").substring(0, 30)}
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[11px] font-medium">{kindLabel(a)}</div>
+                        <div className="mt-0.5 truncate text-[10px] text-muted-foreground">{a.summary}</div>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <Badge variant="outline" className="px-1.5 py-0 text-[10px] text-muted-foreground">
+                          {tKind.has(a.kind) ? tKind(a.kind) : a.kind}
+                        </Badge>
+                        <div className="mt-0.5 text-[10px] tabular-nums text-muted-foreground">{rel(a.ts)}</div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </Card>
+
+            {/* 发现 */}
+            <Card className="p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-xs font-semibold">
+                  <BugIcon className="size-3.5 text-muted-foreground" />
+                  {t("findings")}
+                </div>
+                <Link
+                  href="/function/findings"
+                  className="flex items-center gap-0.5 text-[10px] text-muted-foreground hover:text-foreground"
+                >
+                  {t("all")} <ArrowUpRightIcon className="size-3" />
+                </Link>
+              </div>
+
+              <div className="divide-y">
+                {recentFindings.length === 0 ? (
+                  <div className="py-4 text-center text-xs text-muted-foreground">{t("noFindings")}</div>
+                ) : (
+                  recentFindings.map((f) => (
+                    <div key={f.id} className="flex items-start gap-2 py-2">
+                      <StatusBadge
+                        domain="severity"
+                        value={f.severity}
+                        className="mt-0.5 shrink-0 px-1.5 py-0 text-[10px]"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-[11px] font-semibold">{f.vulnclass}</span>
+                          {f.task_description && (
+                            <span className="truncate text-[10px] text-muted-foreground">{f.task_description}</span>
+                          )}
+                        </div>
+                        <div className="mt-0.5 line-clamp-2 text-[10px] leading-snug text-muted-foreground">
+                          {f.summary}
+                        </div>
+                      </div>
+                      <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">{rel(f.ts)}</span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </Card>
+          </div>
+
+          {/* ── Row 4: 任务表格 ── */}
+          <Card className="overflow-hidden p-0">
+            <div className="flex items-center justify-between border-b px-4 py-3">
+              <div className="flex items-center gap-1.5 text-xs font-semibold">
+                <ClockIcon className="size-3.5 text-muted-foreground" />
+                {t("tasks")}
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] text-muted-foreground">{t("taskCount", { count: tasks.length })}</span>
+                <Link
+                  href="/function/tasks"
+                  className="flex items-center gap-0.5 text-[10px] text-muted-foreground hover:text-foreground"
+                >
+                  {t("all")} <ArrowUpRightIcon className="size-3" />
+                </Link>
+              </div>
+            </div>
+            <table className="w-full border-collapse text-xs">
+              <thead>
+                <tr className="border-b">
+                  {[
+                    t("colTask"),
+                    t("colStatus"),
+                    t("colEngine"),
+                    t("colGoalProgress"),
+                    t("colInFlight"),
+                    t("colLastActivity"),
+                  ].map((h) => (
+                    <th
+                      key={h}
+                      className="px-4 py-2 text-left text-[10px] font-semibold uppercase tracking-widest text-muted-foreground first:pl-4"
+                    >
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {sortedTasks.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-6 text-center text-xs text-muted-foreground">
+                      {t("noTasks")}
+                    </td>
+                  </tr>
+                ) : (
+                  sortedTasks.map((t) => {
+                    const goalsPct = t.goals_total ? Math.round(((t.goals_met ?? 0) / t.goals_total) * 100) : null;
+                    return (
+                      <tr key={t.id} className="border-b last:border-0 transition-colors hover:bg-muted/30">
+                        <td className="max-w-xs px-4 py-3">
+                          <Link href={`/function/tasks/detail?id=${t.id}`} className="group flex flex-col">
+                            <span className="truncate font-medium group-hover:underline">{t.description}</span>
+                            <span className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">{t.id}</span>
+                          </Link>
+                        </td>
+                        <td className="px-4 py-3">
+                          <StatusBadge domain="task" value={t.status} dot className="px-1.5 py-0 text-[10px]" />
+                        </td>
+                        <td className="px-4 py-3">
+                          <StatusBadge
+                            domain="engine"
+                            value={t.engine_mode ?? "idle"}
+                            className="px-1.5 py-0 text-[10px]"
+                          />
+                        </td>
+                        <td className="px-4 py-3">
+                          {goalsPct !== null ? (
+                            <div className="flex items-center gap-2">
+                              <Progress value={goalsPct} className="h-1 w-14" />
+                              <span className="tabular-nums text-muted-foreground">
+                                {t.goals_met ?? 0}/{t.goals_total}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 tabular-nums">
+                          {(t.in_flight ?? 0) > 0 ? (
+                            <span className="font-semibold">{t.in_flight}</span>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 tabular-nums text-muted-foreground">
+                          {rel(t.last_activity_unix ?? t.created_unix)}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </Card>
+
+          {/* ── Row 5: 资产分布 | 流量状态码 | 拦截 & 待审批 ── */}
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+            {/* 资产分布 */}
+            <Card className="p-4">
+              <SectionTitle icon={NetworkIcon} sub={t("byType")}>
+                {t("assetDistribution")}
+              </SectionTitle>
+
+              {assetByType.length === 0 ? (
+                <div className="py-6 text-center text-xs text-muted-foreground">{t("noAssetData")}</div>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {assetByType.map(([type, count]) => (
+                    <div key={type} className="flex items-center gap-2 text-xs">
+                      <span className="w-8 shrink-0 text-right text-[10px] text-muted-foreground">
+                        {t.has(`assetType.${type}`) ? t(`assetType.${type}`) : type}
                       </span>
-                      <span className={cn("shrink-0 font-mono text-[10px]", statusColor(e.status))}>{e.status}</span>
+                      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+                        <div
+                          className={cn("h-full rounded-full", ASSET_COLORS[type] ?? "bg-slate-400")}
+                          style={{ width: `${(count / assetMax) * 100}%` }}
+                        />
+                      </div>
+                      <span className="w-4 text-right tabular-nums">{count}</span>
                     </div>
                   ))}
                 </div>
+              )}
+
+              <div className="mt-3 border-t pt-3 text-[10px] text-muted-foreground">
+                {t("totalNodes", { count: totalAssets })}
               </div>
-            </>
-          )}
-        </Card>
+            </Card>
 
-        {/* 系统状态 & 待审批 */}
-        <Card className="p-4">
-          <SectionTitle icon={ShieldCheckIcon}>{t("systemStatus")}</SectionTitle>
+            {/* 流量状态码 */}
+            <Card className="p-4">
+              <SectionTitle icon={ActivityIcon} sub={t("requestCount", { count: traffic.length })}>
+                {t("trafficStatusCodes")}
+              </SectionTitle>
 
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between rounded-lg border bg-muted/20 px-3 py-2">
-              <div className="text-[10px] text-muted-foreground">{t("llmConfig")}</div>
-              <Badge
-                variant="outline"
-                className={cn(
-                  "text-[10px]",
-                  stats?.llm_configured
-                    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                    : "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400",
-                )}
-              >
-                {stats?.llm_configured ? t("configured") : t("notConfigured")}
-              </Badge>
-            </div>
+              {/* bar chart */}
+              {trafficByCodes.length === 0 ? (
+                <div className="py-6 text-center text-xs text-muted-foreground">{t("noTrafficData")}</div>
+              ) : (
+                <>
+                  <div className="mb-3 flex items-end gap-2" style={{ height: 52 }}>
+                    {trafficByCodes.map(({ code, n }) => (
+                      <div key={code} className="flex flex-1 flex-col items-center gap-1">
+                        <span className="text-[10px] tabular-nums text-muted-foreground">{n}</span>
+                        <div
+                          className={cn("w-full min-h-1 rounded-sm", statusBg(code), "opacity-80")}
+                          style={{ height: Math.max(4, (n / trafficMax) * 36) }}
+                        />
+                        <span className={cn("text-[10px] font-mono", statusColor(code))}>{code}</span>
+                      </div>
+                    ))}
+                  </div>
 
-            <div className="flex items-center justify-between rounded-lg border bg-muted/20 px-3 py-2">
-              <div className="text-[10px] text-muted-foreground">{t("trafficCapture")}</div>
-              <Badge
-                variant="outline"
-                className={cn(
-                  "text-[10px]",
-                  settings?.traffic_capture
-                    ? "border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-400"
-                    : "text-muted-foreground",
-                )}
-              >
-                {settings?.traffic_capture ? t("on") : t("off")}
-              </Badge>
-            </div>
-
-            {activeProfile && (
-              <div className="flex items-center justify-between rounded-lg border bg-muted/20 px-3 py-2">
-                <div className="text-[10px] text-muted-foreground">{t("activeModel")}</div>
-                <span className="font-mono text-[10px]">{activeProfile.model}</span>
-              </div>
-            )}
-          </div>
-
-          {/* pending approvals */}
-          {pendingCount > 0 && (
-            <div className="mt-3">
-              <div className="mb-1.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">
-                {t("pendingApprovals", { count: pendingCount })}
-              </div>
-              <div className="flex flex-col gap-1.5">
-                {pending.slice(0, 3).map((p) => (
-                  <Link
-                    key={p.id}
-                    href="/system/intercept/approvals"
-                    className="flex items-center justify-between rounded-lg border border-amber-500/20 bg-amber-500/5 px-2.5 py-2 hover:bg-amber-500/10"
-                  >
-                    <div className="min-w-0">
-                      <div className="text-[10px] font-medium">{p.tool_name}</div>
-                      <div className="text-[10px] text-muted-foreground">{p.agent_name}</div>
+                  <div className="border-t pt-2.5">
+                    <div className="mb-1.5 text-[10px] text-muted-foreground">{t("recentRequests")}</div>
+                    <div className="flex flex-col gap-1.5">
+                      {recentTraffic.map((e) => (
+                        <div key={e.id} className="flex items-center gap-1.5 text-[10px]">
+                          <span
+                            className={cn(
+                              "shrink-0 rounded border px-1 py-0 font-mono text-[10px]",
+                              e.method === "GET"
+                                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                                : "border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-400",
+                            )}
+                          >
+                            {e.method}
+                          </span>
+                          <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                            {e.host}
+                            {e.url.replace(/^https?:\/\/[^/]+/, "").substring(0, 30)}
+                          </span>
+                          <span className={cn("shrink-0 font-mono text-[10px]", statusColor(e.status))}>{e.status}</span>
+                        </div>
+                      ))}
                     </div>
-                    <ArrowUpRightIcon className="size-3 shrink-0 text-amber-700 dark:text-amber-400" />
-                  </Link>
-                ))}
-                {pendingCount > 3 && (
-                  <Link
-                    href="/system/intercept/approvals"
-                    className="text-center text-[10px] text-muted-foreground hover:text-foreground"
+                  </div>
+                </>
+              )}
+            </Card>
+
+            {/* 系统状态 & 待审批 */}
+            <Card className="p-4">
+              <SectionTitle icon={ShieldCheckIcon}>{t("systemStatus")}</SectionTitle>
+
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center justify-between rounded-lg border bg-muted/20 px-3 py-2">
+                  <div className="text-[10px] text-muted-foreground">{t("llmConfig")}</div>
+                  <Badge
+                    variant="outline"
+                    className={cn(
+                      "text-[10px]",
+                      stats?.llm_configured
+                        ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                        : "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400",
+                    )}
                   >
-                    {t("morePending", { count: pendingCount - 3 })}
-                  </Link>
+                    {stats?.llm_configured ? t("configured") : t("notConfigured")}
+                  </Badge>
+                </div>
+
+                <div className="flex items-center justify-between rounded-lg border bg-muted/20 px-3 py-2">
+                  <div className="text-[10px] text-muted-foreground">{t("trafficCapture")}</div>
+                  <Badge
+                    variant="outline"
+                    className={cn(
+                      "text-[10px]",
+                      settings?.traffic_capture
+                        ? "border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-400"
+                        : "text-muted-foreground",
+                    )}
+                  >
+                    {settings?.traffic_capture ? t("on") : t("off")}
+                  </Badge>
+                </div>
+
+                {activeProfile && (
+                  <div className="flex items-center justify-between rounded-lg border bg-muted/20 px-3 py-2">
+                    <div className="text-[10px] text-muted-foreground">{t("activeModel")}</div>
+                    <span className="font-mono text-[10px]">{activeProfile.model}</span>
+                  </div>
                 )}
               </div>
-            </div>
-          )}
 
-          {pendingCount === 0 && (
-            <div className="mt-3 rounded-lg border bg-muted/10 px-3 py-3 text-center text-[10px] text-muted-foreground">
-              <ShieldCheckIcon className="mx-auto mb-1 size-4 text-emerald-700 dark:text-emerald-500/50" />
-              {t("noPendingIntercepts")}
-            </div>
-          )}
-        </Card>
+              {/* pending approvals */}
+              {pendingCount > 0 && (
+                <div className="mt-3">
+                  <div className="mb-1.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">
+                    {t("pendingApprovals", { count: pendingCount })}
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    {pending.slice(0, 3).map((p) => (
+                      <Link
+                        key={p.id}
+                        href="/system/intercept/approvals"
+                        className="flex items-center justify-between rounded-lg border border-amber-500/20 bg-amber-500/5 px-2.5 py-2 hover:bg-amber-500/10"
+                      >
+                        <div className="min-w-0">
+                          <div className="text-[10px] font-medium">{p.tool_name}</div>
+                          <div className="text-[10px] text-muted-foreground">{p.agent_name}</div>
+                        </div>
+                        <ArrowUpRightIcon className="size-3 shrink-0 text-amber-700 dark:text-amber-400" />
+                      </Link>
+                    ))}
+                    {pendingCount > 3 && (
+                      <Link
+                        href="/system/intercept/approvals"
+                        className="text-center text-[10px] text-muted-foreground hover:text-foreground"
+                      >
+                        {t("morePending", { count: pendingCount - 3 })}
+                      </Link>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {pendingCount === 0 && (
+                <div className="mt-3 rounded-lg border bg-muted/10 px-3 py-3 text-center text-[10px] text-muted-foreground">
+                  <ShieldCheckIcon className="mx-auto mb-1 size-4 text-emerald-700 dark:text-emerald-500/50" />
+                  {t("noPendingIntercepts")}
+                </div>
+              )}
+            </Card>
+          </div>
+          </div>
+        </StateBoundary>
       </div>
-    </div>
+    </PageShell>
   );
 }

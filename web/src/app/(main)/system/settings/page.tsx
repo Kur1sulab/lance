@@ -14,6 +14,8 @@ import {
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
+import { StateBoundary } from "@/components/data/state-boundary";
+import { PageShell } from "@/components/shell/page-shell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -22,13 +24,22 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { LOCALE_LABELS, LOCALES, type Locale } from "@/i18n/config";
 import { setActiveLocale, useActiveLocale } from "@/i18n/locale-store";
+import { usePermissionDenied } from "@/hooks/use-permission-denied";
 import { api } from "@/lib/api";
+import { errorCodeOf } from "@/lib/api-error";
 import { type ChatSendMode, setChatSendMode, useChatSendMode, useChatSendModeOptions } from "@/lib/chat-send-mode";
 import type { Settings } from "@/lib/types";
 
 
 export default function SystemSettingsPage() {
   const t = useTranslations("settingsPage");
+  const tn = useTranslations("nav");
+  const tp = useTranslations("pageStates");
+  const { denied, check: checkPermission, reset: resetPermission } = usePermissionDenied();
+  const lastError = React.useRef<unknown>(null);
+  const [error, setError] = React.useState<string | null>(null);
+  // 后端回来的配置字段数：0 表示没有可编辑项（空态），而不是「全都是默认值」。
+  const [configKeys, setConfigKeys] = React.useState(0);
   const richTags = {
     b: (chunks: React.ReactNode) => <b>{chunks}</b>,
     br: () => <br />,
@@ -129,13 +140,32 @@ export default function SystemSettingsPage() {
       .catch((e) => toast.error(t("toast.saveFailed", { error: (e as Error).message })));
   };
 
-  React.useEffect(() => {
+  // 重新取一次配置：首屏与「重试」都走这里，避免两处各写一遍请求。
+  const reload = React.useCallback(() => {
+    setError(null);
+    lastError.current = null;
+    setLoaded(false);
     api
       .settings()
-      .then(apply)
-      .catch(() => undefined)
+      .then((s) => {
+        apply(s);
+        // 后端到底回了几个字段：一个都没回就是「没有可编辑项」，走空态，
+        // 而不是把一堆默认值渲染成「配置就长这样」。只在取数路径上记，
+        // 保存接口返回什么不影响这个判定。
+        setConfigKeys(Object.keys(s ?? {}).length);
+      })
+      .catch((e) => {
+        // 原来这里静默吞掉：读不到配置时页面照常渲染成一堆默认开关，
+        // 用户会以为「后端就是这么配的」。错误态就是要把它说出来。
+        lastError.current = e;
+        checkPermission(e);
+        setError((e as Error).message);
+      })
       .finally(() => setLoaded(true));
-  }, [apply]);
+  }, [apply, checkPermission]);
+  React.useEffect(() => {
+    reload();
+  }, [reload]);
 
   const toggleTraffic = (v: boolean) => {
     setTrafficCapture(v); // optimistic
@@ -285,422 +315,467 @@ export default function SystemSettingsPage() {
   const braveNeedsKey = webSearch && backend === "brave-free" && !braveKeySet;
 
   return (
-    <div className="flex flex-1 flex-col gap-4 md:gap-6">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight">{t("title")}</h1>
-        <p className="text-muted-foreground text-sm">{t("subtitle")}</p>
-      </div>
-
-      {/* 多列而非 grid：网络搜索卡片比其余高数倍，且高度随所选后端变化（brave/tavily
-          的 key 输入是条件渲染）。grid 会按最高的一张撑满整行、在旁边留下大片空白，
-          多列则自动按内容高度平衡填充。卡片间距靠 mb 而非 gap——多列布局下
-          column-gap 只管列间距，行间距要由子元素自己给。 */}
-      <div className="columns-1 gap-4 md:gap-6 lg:columns-2">
-        <Card className="mb-4 break-inside-avoid md:mb-6">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <RadioTowerIcon className="size-4" />
-              {t("trafficCapture.title")}
-            </CardTitle>
-            <CardDescription>{t.rich("trafficCapture.desc", richTags)}</CardDescription>
-          </CardHeader>
-          <CardContent className="flex items-center justify-between gap-4">
-            <Label htmlFor="traffic-capture" className="text-sm font-normal text-muted-foreground">
-              {trafficCapture ? t("trafficCapture.on") : t("trafficCapture.off")}
-            </Label>
-            <Switch
-              id="traffic-capture"
-              checked={trafficCapture}
-              disabled={!loaded || saving}
-              onCheckedChange={toggleTraffic}
-            />
-          </CardContent>
-        </Card>
-
-        <Card className="mb-4 break-inside-avoid md:mb-6">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <RadioTowerIcon className="size-4" />
-              {t("agentBinding.title")}
-            </CardTitle>
-            <CardDescription id="agent-traffic-binding-description">
-              {t.rich("agentBinding.desc", richTags)}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex items-center justify-between gap-4">
-            <Label htmlFor="agent-traffic-binding" className="text-sm font-normal text-muted-foreground">
-              {agentTrafficBinding ? t("agentBinding.on") : t("agentBinding.off")}
-            </Label>
-            <Switch
-              id="agent-traffic-binding"
-              aria-describedby="agent-traffic-binding-description"
-              checked={agentTrafficBinding}
-              disabled={!loaded || saving}
-              onCheckedChange={toggleAgentTrafficBinding}
-            />
-          </CardContent>
-        </Card>
-
-        <Card className="mb-4 break-inside-avoid md:mb-6">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <RadioTowerIcon className="size-4" />
-              {t("globalProxy.title")}
-            </CardTitle>
-            <CardDescription>{t.rich("globalProxy.desc", richTags)}</CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-2">
-            <Label htmlFor="global-proxy" className="text-sm font-normal text-muted-foreground">
-              {t("globalProxy.addrLabel")}
-            </Label>
-            <div className="flex items-center gap-2">
-              <Input
-                id="global-proxy"
-                autoComplete="off"
-                placeholder={t("globalProxy.placeholder")}
-                value={globalProxyInput}
-                disabled={!loaded || savingGlobalProxy}
-                onChange={(e) => setGlobalProxyInput(e.target.value)}
-              />
-              <Button type="button" onClick={saveGlobalProxy} disabled={!loaded || savingGlobalProxy}>
-                {t("save")}
-              </Button>
+    <PageShell
+      title={t("title")}
+      description={t("subtitle")}
+      breadcrumb={[{ label: tn("group.govern"), href: "/dashboard" }, { label: tn("item.settings") }]}
+    >
+      <div className="px-4 py-3 md:px-6">
+        <StateBoundary
+          loading={!loaded}
+          error={
+            error
+              ? {
+                  title: tp("errorTitle"),
+                  detail: tp("errorDetail"),
+                  code: errorCodeOf(lastError.current),
+                  codeLabel: tp("errorCodeLabel"),
+                  retryLabel: tp("retry"),
+                }
+              : null
+          }
+          permission={denied ? "settings:read" : null}
+          permissionProps={{
+            title: tp("permissionTitle"),
+            detail: tp("permissionDetail", { name: tn("item.settings"), ask: tp("askAdmin") }),
+            missingLabel: tp("permissionMissing"),
+            askLabel: tp("permissionAsk"),
+            ask: tp("askAdmin"),
+          }}
+          empty={!error && configKeys === 0 && !denied}
+          emptyProps={{
+            title: tp("emptyTitle"),
+            reason: tp("empty.settings"),
+            nextStep: { label: tp("retry"), onClick: reload },
+          }}
+          skeleton={
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-6">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div
+                  // biome-ignore lint/suspicious/noArrayIndexKey: 骨架屏占位，无真实数据标识。
+                  key={i}
+                  className="h-40 animate-pulse rounded-xl bg-muted"
+                />
+              ))}
             </div>
-            <p className="text-muted-foreground text-xs">
-              {globalProxyInput.trim() ? t("globalProxy.configured") : t("globalProxy.notConfigured")}
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card className="mb-4 break-inside-avoid md:mb-6">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <ShieldAlertIcon className="size-4" />
-              {t("constraints.title")}
-            </CardTitle>
-            <CardDescription>{t.rich("constraints.desc", richTags)}</CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-4">
-            <div className="flex items-center justify-between gap-4">
-              <Label htmlFor="inject-planner" className="text-sm font-normal text-muted-foreground">
-                {t("constraints.injectPlanner")}
-                {injectPlanner ? t("onSuffix") : t("offSuffix")}
-              </Label>
-              <Switch
-                id="inject-planner"
-                checked={injectPlanner}
-                disabled={!loaded}
-                onCheckedChange={toggleInjectPlanner}
-              />
-            </div>
-            <div className="flex items-center justify-between gap-4">
-              <Label htmlFor="inject-worker" className="text-sm font-normal text-muted-foreground">
-                {t("constraints.injectWorker")}
-                {injectWorker ? t("onSuffix") : t("offSuffix")}
-              </Label>
-              <Switch
-                id="inject-worker"
-                checked={injectWorker}
-                disabled={!loaded}
-                onCheckedChange={toggleInjectWorker}
-              />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="mb-4 break-inside-avoid md:mb-6">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <FlaskConicalIcon className="size-4" />
-              {t("experimental.title")}
-            </CardTitle>
-            <CardDescription>{t.rich("experimental.desc", richTags)}</CardDescription>
-          </CardHeader>
-          <CardContent className="flex items-center justify-between gap-4">
-            <Label htmlFor="noa-compaction" className="text-sm font-normal text-muted-foreground">
-              {t("experimental.noaLabel")}
-              {noaCompaction ? t("onSuffix") : t("offSuffix")}
-            </Label>
-            <Switch
-              id="noa-compaction"
-              checked={noaCompaction}
-              disabled={!loaded}
-              onCheckedChange={toggleNoaCompaction}
-            />
-          </CardContent>
-        </Card>
-
-        <Card className="mb-4 break-inside-avoid md:mb-6">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <SearchIcon className="size-4" />
-              {t("webSearch.title")}
-            </CardTitle>
-            <CardDescription>{t.rich("webSearch.desc", richTags)}</CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-4">
-            <div className="flex items-center justify-between gap-4">
-              <Label htmlFor="web-search" className="text-sm font-normal text-muted-foreground">
-                {webSearch ? t("webSearch.on") : t("webSearch.off")}
-              </Label>
-              <Switch
-                id="web-search"
-                checked={webSearch}
-                disabled={!loaded || saving}
-                onCheckedChange={(v) => {
-                  setWebSearch(v); // optimistic
-                  saveWebSearch({ web_search_enabled: v });
-                }}
-              />
-            </div>
-
-            {webSearch && (
-              <div className="flex items-center justify-between gap-4">
-                <Label className="text-sm font-normal text-muted-foreground">{t("webSearch.sourceLabel")}</Label>
-                <Select
-                  value={backend}
+          }
+          onRetry={() => {
+            resetPermission();
+            reload();
+          }}
+        >
+          {/* 多列而非 grid：网络搜索卡片比其余高数倍，且高度随所选后端变化（brave/tavily
+              的 key 输入是条件渲染）。grid 会按最高的一张撑满整行、在旁边留下大片空白，
+              多列则自动按内容高度平衡填充。卡片间距靠 mb 而非 gap——多列布局下
+              column-gap 只管列间距，行间距要由子元素自己给。 */}
+          <div className="columns-1 gap-4 md:gap-6 lg:columns-2">
+            <Card className="mb-4 break-inside-avoid md:mb-6">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <RadioTowerIcon className="size-4" />
+                  {t("trafficCapture.title")}
+                </CardTitle>
+                <CardDescription>{t.rich("trafficCapture.desc", richTags)}</CardDescription>
+              </CardHeader>
+              <CardContent className="flex items-center justify-between gap-4">
+                <Label htmlFor="traffic-capture" className="text-sm font-normal text-muted-foreground">
+                  {trafficCapture ? t("trafficCapture.on") : t("trafficCapture.off")}
+                </Label>
+                <Switch
+                  id="traffic-capture"
+                  checked={trafficCapture}
                   disabled={!loaded || saving}
-                  onValueChange={(v) => {
-                    setBackend(v); // optimistic
-                    saveWebSearch({ web_search_backend: v });
-                  }}
-                >
-                  <SelectTrigger className="w-48 shrink-0">
-                    <SelectValue placeholder={t("webSearch.sourcePlaceholder")} />
+                  onCheckedChange={toggleTraffic}
+                />
+              </CardContent>
+            </Card>
+
+            <Card className="mb-4 break-inside-avoid md:mb-6">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <RadioTowerIcon className="size-4" />
+                  {t("agentBinding.title")}
+                </CardTitle>
+                <CardDescription id="agent-traffic-binding-description">
+                  {t.rich("agentBinding.desc", richTags)}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex items-center justify-between gap-4">
+                <Label htmlFor="agent-traffic-binding" className="text-sm font-normal text-muted-foreground">
+                  {agentTrafficBinding ? t("agentBinding.on") : t("agentBinding.off")}
+                </Label>
+                <Switch
+                  id="agent-traffic-binding"
+                  aria-describedby="agent-traffic-binding-description"
+                  checked={agentTrafficBinding}
+                  disabled={!loaded || saving}
+                  onCheckedChange={toggleAgentTrafficBinding}
+                />
+              </CardContent>
+            </Card>
+
+            <Card className="mb-4 break-inside-avoid md:mb-6">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <RadioTowerIcon className="size-4" />
+                  {t("globalProxy.title")}
+                </CardTitle>
+                <CardDescription>{t.rich("globalProxy.desc", richTags)}</CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-2">
+                <Label htmlFor="global-proxy" className="text-sm font-normal text-muted-foreground">
+                  {t("globalProxy.addrLabel")}
+                </Label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    id="global-proxy"
+                    autoComplete="off"
+                    placeholder={t("globalProxy.placeholder")}
+                    value={globalProxyInput}
+                    disabled={!loaded || savingGlobalProxy}
+                    onChange={(e) => setGlobalProxyInput(e.target.value)}
+                  />
+                  <Button type="button" onClick={saveGlobalProxy} disabled={!loaded || savingGlobalProxy}>
+                    {t("save")}
+                  </Button>
+                </div>
+                <p className="text-muted-foreground text-xs">
+                  {globalProxyInput.trim() ? t("globalProxy.configured") : t("globalProxy.notConfigured")}
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card className="mb-4 break-inside-avoid md:mb-6">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <ShieldAlertIcon className="size-4" />
+                  {t("constraints.title")}
+                </CardTitle>
+                <CardDescription>{t.rich("constraints.desc", richTags)}</CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-4">
+                <div className="flex items-center justify-between gap-4">
+                  <Label htmlFor="inject-planner" className="text-sm font-normal text-muted-foreground">
+                    {t("constraints.injectPlanner")}
+                    {injectPlanner ? t("onSuffix") : t("offSuffix")}
+                  </Label>
+                  <Switch
+                    id="inject-planner"
+                    checked={injectPlanner}
+                    disabled={!loaded}
+                    onCheckedChange={toggleInjectPlanner}
+                  />
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <Label htmlFor="inject-worker" className="text-sm font-normal text-muted-foreground">
+                    {t("constraints.injectWorker")}
+                    {injectWorker ? t("onSuffix") : t("offSuffix")}
+                  </Label>
+                  <Switch
+                    id="inject-worker"
+                    checked={injectWorker}
+                    disabled={!loaded}
+                    onCheckedChange={toggleInjectWorker}
+                  />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="mb-4 break-inside-avoid md:mb-6">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <FlaskConicalIcon className="size-4" />
+                  {t("experimental.title")}
+                </CardTitle>
+                <CardDescription>{t.rich("experimental.desc", richTags)}</CardDescription>
+              </CardHeader>
+              <CardContent className="flex items-center justify-between gap-4">
+                <Label htmlFor="noa-compaction" className="text-sm font-normal text-muted-foreground">
+                  {t("experimental.noaLabel")}
+                  {noaCompaction ? t("onSuffix") : t("offSuffix")}
+                </Label>
+                <Switch
+                  id="noa-compaction"
+                  checked={noaCompaction}
+                  disabled={!loaded}
+                  onCheckedChange={toggleNoaCompaction}
+                />
+              </CardContent>
+            </Card>
+
+            <Card className="mb-4 break-inside-avoid md:mb-6">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <SearchIcon className="size-4" />
+                  {t("webSearch.title")}
+                </CardTitle>
+                <CardDescription>{t.rich("webSearch.desc", richTags)}</CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-4">
+                <div className="flex items-center justify-between gap-4">
+                  <Label htmlFor="web-search" className="text-sm font-normal text-muted-foreground">
+                    {webSearch ? t("webSearch.on") : t("webSearch.off")}
+                  </Label>
+                  <Switch
+                    id="web-search"
+                    checked={webSearch}
+                    disabled={!loaded || saving}
+                    onCheckedChange={(v) => {
+                      setWebSearch(v); // optimistic
+                      saveWebSearch({ web_search_enabled: v });
+                    }}
+                  />
+                </div>
+
+                {webSearch && (
+                  <div className="flex items-center justify-between gap-4">
+                    <Label className="text-sm font-normal text-muted-foreground">{t("webSearch.sourceLabel")}</Label>
+                    <Select
+                      value={backend}
+                      disabled={!loaded || saving}
+                      onValueChange={(v) => {
+                        setBackend(v); // optimistic
+                        saveWebSearch({ web_search_backend: v });
+                      }}
+                    >
+                      <SelectTrigger className="w-48 shrink-0">
+                        <SelectValue placeholder={t("webSearch.sourcePlaceholder")} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="ddgs">{t("webSearch.sourceDdgs")}</SelectItem>
+                        <SelectItem value="brave-free">{t("webSearch.sourceBrave")}</SelectItem>
+                        <SelectItem value="tavily">{t("webSearch.sourceTavily")}</SelectItem>
+                        <SelectItem value="deepseek">{t("webSearch.sourceDeepseek")}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                {webSearch && backend === "deepseek" && (
+                  <div className="border-border/60 bg-muted/30 flex flex-col gap-2 rounded-md border p-3">
+                    <p className="text-sm font-medium">{t("webSearch.deepseekTitle")}</p>
+                    <p className="text-muted-foreground text-xs leading-relaxed">
+                      {t.rich("webSearch.deepseekDesc1", richTags)}
+                    </p>
+                    <p className="text-muted-foreground text-xs leading-relaxed">
+                      {t.rich("webSearch.deepseekDesc2", richTags)}
+                    </p>
+                    <p className="text-muted-foreground text-xs leading-relaxed">{t("webSearch.deepseekDesc3")}</p>
+                  </div>
+                )}
+
+                {webSearch && backend === "brave-free" && (
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="brave-key" className="text-sm font-normal text-muted-foreground">
+                      {t("webSearch.braveKeyLabel")}
+                      {braveKeySet && <span className="ml-2 text-xs text-emerald-700 dark:text-emerald-500">{t("configured")}</span>}
+                    </Label>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        id="brave-key"
+                        type="password"
+                        autoComplete="off"
+                        placeholder={
+                          braveKeySet ? t("webSearch.braveKeyPlaceholderSet") : t("webSearch.braveKeyPlaceholderUnset")
+                        }
+                        value={braveKeyInput}
+                        disabled={!loaded || savingKey}
+                        onChange={(e) => setBraveKeyInput(e.target.value)}
+                      />
+                      <Button
+                        type="button"
+                        onClick={saveBraveKey}
+                        disabled={!loaded || savingKey || braveKeyInput.trim() === ""}
+                      >
+                        {t("save")}
+                      </Button>
+                    </div>
+                    {braveNeedsKey && <p className="text-xs text-amber-700 dark:text-amber-500">{t("webSearch.braveNeedsKey")}</p>}
+                    <p className="text-muted-foreground text-xs">{t("webSearch.braveQuota")}</p>
+                  </div>
+                )}
+
+                {webSearch && backend === "tavily" && (
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="tavily-key" className="text-sm font-normal text-muted-foreground">
+                      {t("webSearch.tavilyKeyLabel")}
+                      {tavilyKeySet && <span className="ml-2 text-xs text-emerald-700 dark:text-emerald-500">{t("configured")}</span>}
+                    </Label>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        id="tavily-key"
+                        type="password"
+                        autoComplete="off"
+                        placeholder={
+                          tavilyKeySet ? t("webSearch.tavilyKeyPlaceholderSet") : t("webSearch.tavilyKeyPlaceholderUnset")
+                        }
+                        value={tavilyKeyInput}
+                        disabled={!loaded || savingTavilyKey}
+                        onChange={(e) => setTavilyKeyInput(e.target.value)}
+                      />
+                      <Button
+                        type="button"
+                        onClick={saveTavilyKey}
+                        disabled={!loaded || savingTavilyKey || tavilyKeyInput.trim() === ""}
+                      >
+                        {t("save")}
+                      </Button>
+                    </div>
+                    {webSearch && backend === "tavily" && !tavilyKeySet && (
+                      <p className="text-xs text-amber-700 dark:text-amber-500">{t("webSearch.tavilyNeedsKey")}</p>
+                    )}
+                    <p className="text-muted-foreground text-xs">{t("webSearch.tavilyGetKey")}</p>
+                  </div>
+                )}
+
+                {webSearch && (
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="ws-proxy" className="text-sm font-normal text-muted-foreground">
+                      {t("webSearch.proxyLabel")}
+                    </Label>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        id="ws-proxy"
+                        autoComplete="off"
+                        placeholder={t("webSearch.proxyPlaceholder")}
+                        value={proxyInput}
+                        disabled={!loaded || savingProxy}
+                        onChange={(e) => setProxyInput(e.target.value)}
+                      />
+                      <Button type="button" onClick={saveProxy} disabled={!loaded || savingProxy}>
+                        {t("save")}
+                      </Button>
+                    </div>
+                    <p className="text-muted-foreground text-xs">{t("webSearch.proxyHint")}</p>
+                  </div>
+                )}
+
+                {webSearch && (
+                  <div className="flex items-center justify-between gap-4 border-t pt-4">
+                    <p className="text-muted-foreground text-xs">{t("webSearch.testHint")}</p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={runTest}
+                      disabled={!loaded || testing}
+                      className="shrink-0"
+                    >
+                      {testing ? t("webSearch.testRunning") : t("webSearch.testButton")}
+                    </Button>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="mb-4 break-inside-avoid md:mb-6">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <RadioTowerIcon className="size-4" />
+                  {t("python.title")}
+                </CardTitle>
+                <CardDescription>{t.rich("python.desc", richTags)}</CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-3">
+                <div className="flex items-center gap-2">
+                  <Input
+                    className="font-mono text-sm"
+                    placeholder={t("python.placeholder")}
+                    value={pyInterp}
+                    disabled={!loaded || saving}
+                    onChange={(e) => setPyInterp(e.target.value)}
+                  />
+                  <Button variant="outline" onClick={detectPython} disabled={!loaded || saving}>
+                    {t("python.detect")}
+                  </Button>
+                  <Button onClick={savePython} disabled={!loaded || saving}>
+                    {t("save")}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="mb-4 break-inside-avoid md:mb-6">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <CpuIcon className="size-4" />
+                  {t("workers.title")}
+                </CardTitle>
+                <CardDescription>{t.rich("workers.desc", richTags)}</CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-3">
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    min={1}
+                    className="w-32 font-mono text-sm"
+                    placeholder="3"
+                    value={workers}
+                    disabled={!loaded || savingWorkers}
+                    onChange={(e) => setWorkers(e.target.value)}
+                  />
+                  <Button onClick={saveWorkers} disabled={!loaded || savingWorkers}>
+                    {t("save")}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="mb-4 break-inside-avoid md:mb-6">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <LanguagesIcon className="size-4" />
+                  {t("language.title")}
+                </CardTitle>
+                <CardDescription>{t("language.desc")}</CardDescription>
+              </CardHeader>
+              <CardContent className="flex items-center justify-between gap-4">
+                <Label htmlFor="ui-language" className="text-sm font-normal text-muted-foreground">
+                  {t("language.label")}
+                </Label>
+                <Select value={activeLocale} onValueChange={changeLanguage}>
+                  <SelectTrigger id="ui-language" className="w-72">
+                    <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="ddgs">{t("webSearch.sourceDdgs")}</SelectItem>
-                    <SelectItem value="brave-free">{t("webSearch.sourceBrave")}</SelectItem>
-                    <SelectItem value="tavily">{t("webSearch.sourceTavily")}</SelectItem>
-                    <SelectItem value="deepseek">{t("webSearch.sourceDeepseek")}</SelectItem>
+                    {LOCALES.map((loc) => (
+                      <SelectItem key={loc} value={loc}>
+                        {LOCALE_LABELS[loc]}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
-              </div>
-            )}
+              </CardContent>
+            </Card>
 
-            {webSearch && backend === "deepseek" && (
-              <div className="border-border/60 bg-muted/30 flex flex-col gap-2 rounded-md border p-3">
-                <p className="text-sm font-medium">{t("webSearch.deepseekTitle")}</p>
-                <p className="text-muted-foreground text-xs leading-relaxed">
-                  {t.rich("webSearch.deepseekDesc1", richTags)}
-                </p>
-                <p className="text-muted-foreground text-xs leading-relaxed">
-                  {t.rich("webSearch.deepseekDesc2", richTags)}
-                </p>
-                <p className="text-muted-foreground text-xs leading-relaxed">{t("webSearch.deepseekDesc3")}</p>
-              </div>
-            )}
-
-            {webSearch && backend === "brave-free" && (
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="brave-key" className="text-sm font-normal text-muted-foreground">
-                  {t("webSearch.braveKeyLabel")}
-                  {braveKeySet && <span className="ml-2 text-xs text-emerald-700 dark:text-emerald-500">{t("configured")}</span>}
+            <Card className="mb-4 break-inside-avoid md:mb-6">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <KeyboardIcon className="size-4" />
+                  {t("sendKey.title")}
+                </CardTitle>
+                <CardDescription>{t.rich("sendKey.desc", richTags)}</CardDescription>
+              </CardHeader>
+              <CardContent className="flex items-center justify-between gap-4">
+                <Label htmlFor="chat-send-mode" className="text-sm font-normal text-muted-foreground">
+                  {t("sendKey.label")}
                 </Label>
-                <div className="flex items-center gap-2">
-                  <Input
-                    id="brave-key"
-                    type="password"
-                    autoComplete="off"
-                    placeholder={
-                      braveKeySet ? t("webSearch.braveKeyPlaceholderSet") : t("webSearch.braveKeyPlaceholderUnset")
-                    }
-                    value={braveKeyInput}
-                    disabled={!loaded || savingKey}
-                    onChange={(e) => setBraveKeyInput(e.target.value)}
-                  />
-                  <Button
-                    type="button"
-                    onClick={saveBraveKey}
-                    disabled={!loaded || savingKey || braveKeyInput.trim() === ""}
-                  >
-                    {t("save")}
-                  </Button>
-                </div>
-                {braveNeedsKey && <p className="text-xs text-amber-700 dark:text-amber-500">{t("webSearch.braveNeedsKey")}</p>}
-                <p className="text-muted-foreground text-xs">{t("webSearch.braveQuota")}</p>
-              </div>
-            )}
-
-            {webSearch && backend === "tavily" && (
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="tavily-key" className="text-sm font-normal text-muted-foreground">
-                  {t("webSearch.tavilyKeyLabel")}
-                  {tavilyKeySet && <span className="ml-2 text-xs text-emerald-700 dark:text-emerald-500">{t("configured")}</span>}
-                </Label>
-                <div className="flex items-center gap-2">
-                  <Input
-                    id="tavily-key"
-                    type="password"
-                    autoComplete="off"
-                    placeholder={
-                      tavilyKeySet ? t("webSearch.tavilyKeyPlaceholderSet") : t("webSearch.tavilyKeyPlaceholderUnset")
-                    }
-                    value={tavilyKeyInput}
-                    disabled={!loaded || savingTavilyKey}
-                    onChange={(e) => setTavilyKeyInput(e.target.value)}
-                  />
-                  <Button
-                    type="button"
-                    onClick={saveTavilyKey}
-                    disabled={!loaded || savingTavilyKey || tavilyKeyInput.trim() === ""}
-                  >
-                    {t("save")}
-                  </Button>
-                </div>
-                {webSearch && backend === "tavily" && !tavilyKeySet && (
-                  <p className="text-xs text-amber-700 dark:text-amber-500">{t("webSearch.tavilyNeedsKey")}</p>
-                )}
-                <p className="text-muted-foreground text-xs">{t("webSearch.tavilyGetKey")}</p>
-              </div>
-            )}
-
-            {webSearch && (
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="ws-proxy" className="text-sm font-normal text-muted-foreground">
-                  {t("webSearch.proxyLabel")}
-                </Label>
-                <div className="flex items-center gap-2">
-                  <Input
-                    id="ws-proxy"
-                    autoComplete="off"
-                    placeholder={t("webSearch.proxyPlaceholder")}
-                    value={proxyInput}
-                    disabled={!loaded || savingProxy}
-                    onChange={(e) => setProxyInput(e.target.value)}
-                  />
-                  <Button type="button" onClick={saveProxy} disabled={!loaded || savingProxy}>
-                    {t("save")}
-                  </Button>
-                </div>
-                <p className="text-muted-foreground text-xs">{t("webSearch.proxyHint")}</p>
-              </div>
-            )}
-
-            {webSearch && (
-              <div className="flex items-center justify-between gap-4 border-t pt-4">
-                <p className="text-muted-foreground text-xs">{t("webSearch.testHint")}</p>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={runTest}
-                  disabled={!loaded || testing}
-                  className="shrink-0"
-                >
-                  {testing ? t("webSearch.testRunning") : t("webSearch.testButton")}
-                </Button>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card className="mb-4 break-inside-avoid md:mb-6">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <RadioTowerIcon className="size-4" />
-              {t("python.title")}
-            </CardTitle>
-            <CardDescription>{t.rich("python.desc", richTags)}</CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-3">
-            <div className="flex items-center gap-2">
-              <Input
-                className="font-mono text-sm"
-                placeholder={t("python.placeholder")}
-                value={pyInterp}
-                disabled={!loaded || saving}
-                onChange={(e) => setPyInterp(e.target.value)}
-              />
-              <Button variant="outline" onClick={detectPython} disabled={!loaded || saving}>
-                {t("python.detect")}
-              </Button>
-              <Button onClick={savePython} disabled={!loaded || saving}>
-                {t("save")}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="mb-4 break-inside-avoid md:mb-6">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <CpuIcon className="size-4" />
-              {t("workers.title")}
-            </CardTitle>
-            <CardDescription>{t.rich("workers.desc", richTags)}</CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-3">
-            <div className="flex items-center gap-2">
-              <Input
-                type="number"
-                min={1}
-                className="w-32 font-mono text-sm"
-                placeholder="3"
-                value={workers}
-                disabled={!loaded || savingWorkers}
-                onChange={(e) => setWorkers(e.target.value)}
-              />
-              <Button onClick={saveWorkers} disabled={!loaded || savingWorkers}>
-                {t("save")}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="mb-4 break-inside-avoid md:mb-6">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <LanguagesIcon className="size-4" />
-              {t("language.title")}
-            </CardTitle>
-            <CardDescription>{t("language.desc")}</CardDescription>
-          </CardHeader>
-          <CardContent className="flex items-center justify-between gap-4">
-            <Label htmlFor="ui-language" className="text-sm font-normal text-muted-foreground">
-              {t("language.label")}
-            </Label>
-            <Select value={activeLocale} onValueChange={changeLanguage}>
-              <SelectTrigger id="ui-language" className="w-72">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {LOCALES.map((loc) => (
-                  <SelectItem key={loc} value={loc}>
-                    {LOCALE_LABELS[loc]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </CardContent>
-        </Card>
-
-        <Card className="mb-4 break-inside-avoid md:mb-6">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <KeyboardIcon className="size-4" />
-              {t("sendKey.title")}
-            </CardTitle>
-            <CardDescription>{t.rich("sendKey.desc", richTags)}</CardDescription>
-          </CardHeader>
-          <CardContent className="flex items-center justify-between gap-4">
-            <Label htmlFor="chat-send-mode" className="text-sm font-normal text-muted-foreground">
-              {t("sendKey.label")}
-            </Label>
-            <Select value={sendMode} onValueChange={(v) => setChatSendMode(v as ChatSendMode)}>
-              <SelectTrigger id="chat-send-mode" className="w-72">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {sendModeOptions.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </CardContent>
-        </Card>
+                <Select value={sendMode} onValueChange={(v) => setChatSendMode(v as ChatSendMode)}>
+                  <SelectTrigger id="chat-send-mode" className="w-72">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {sendModeOptions.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </CardContent>
+            </Card>
+          </div>
+        </StateBoundary>
       </div>
-    </div>
+    </PageShell>
   );
 }

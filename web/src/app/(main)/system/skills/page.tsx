@@ -17,6 +17,8 @@ import {
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
+import { StateBoundary } from "@/components/data/state-boundary";
+import { PageShell } from "@/components/shell/page-shell";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -38,8 +40,10 @@ import { Sheet, SheetContent, SheetFooter, SheetHeader, SheetTitle } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { getDateLocale } from "@/i18n/datetime";
+import { usePermissionDenied } from "@/hooks/use-permission-denied";
 import { useAgentLabels } from "@/lib/agent-i18n";
 import { ApiError, api } from "@/lib/api";
+import { errorCodeOf, errorMessageOf } from "@/lib/api-error";
 import type { Agent, MCPServer, MissingSkill, SkillCall, SkillItem } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -304,12 +308,18 @@ function SkillsOverview({
 // ── Page ──────────────────────────────────────────────────────────────────
 export default function SkillsPage() {
   const t = useTranslations("skillsPage");
+  const tn = useTranslations("nav");
+  const tp = useTranslations("pageStates");
+  const perm = usePermissionDenied();
   const agentLabels = useAgentLabels();
   const [skills, setSkills] = React.useState<SkillItem[]>([]);
   const [agents, setAgents] = React.useState<Agent[]>([]);
   const [selected, setSelected] = React.useState<Selected | null>(null);
   const [visibility, setVisibility] = React.useState<Record<string, string[]>>({});
   const [expanded, setExpanded] = React.useState<Set<string>>(new Set());
+  const [loaded, setLoaded] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const lastError = React.useRef<unknown>(null);
 
   // file editor
   const [fileContent, setFileContent] = React.useState("");
@@ -352,6 +362,8 @@ export default function SkillsPage() {
   const [missing, setMissing] = React.useState<MissingSkill[]>([]);
 
   // ── Data ──────────────────────────────────────────────────────────────────
+  const checkPerm = perm.check;
+
   const load = React.useCallback(() => {
     api
       .agents()
@@ -375,6 +387,8 @@ export default function SkillsPage() {
       .skills()
       .then((ss) => {
         setSkills(ss);
+        setError(null);
+        lastError.current = null;
         ss.forEach((s) => {
           void api
             .skillVisibility(s.name)
@@ -384,10 +398,14 @@ export default function SkillsPage() {
             });
         });
       })
-      .catch(() => {
-        /* 查询失败时忽略并保持默认状态 */
-      });
-  }, []);
+      .catch((e) => {
+        // 原来这里静默吞掉，用户只会看到「左边栏空着」——把失败说出来，403 单独走无权限态。
+        lastError.current = e;
+        checkPerm(e);
+        setError(errorMessageOf(e));
+      })
+      .finally(() => setLoaded(true));
+  }, [checkPerm]);
 
   React.useEffect(() => {
     load();
@@ -666,7 +684,7 @@ export default function SkillsPage() {
     return (
       <div key="__inline_create__" className="flex items-center gap-1 py-0.5 pr-2" style={{ paddingLeft: indent }}>
         {creating?.kind === "dir" ? (
-          <FolderIcon className="size-3.5 shrink-0 text-amber-700 dark:text-amber-500" />
+          <FolderIcon className="size-3.5 shrink-0 text-foreground/70" />
         ) : (
           <FileTextIcon className="size-3.5 shrink-0 text-muted-foreground" />
         )}
@@ -718,9 +736,9 @@ export default function SkillsPage() {
             >
               <ChevronRightIcon className={cn("size-3.5 shrink-0 transition-transform", open && "rotate-90")} />
               {open ? (
-                <FolderOpenIcon className="size-3.5 shrink-0 text-amber-700 dark:text-amber-500" />
+                <FolderOpenIcon className="size-3.5 shrink-0 text-foreground/70" />
               ) : (
-                <FolderIcon className="size-3.5 shrink-0 text-amber-700 dark:text-amber-500" />
+                <FolderIcon className="size-3.5 shrink-0 text-foreground/70" />
               )}
               <span className="min-w-0 flex-1 truncate" title={node.path}>
                 {node.name}
@@ -827,18 +845,17 @@ export default function SkillsPage() {
   const selectedSkill = selected ? (skills.find((s) => s.name === selected.skill) ?? null) : null;
 
   return (
-    <div data-content-padding="false" className="flex flex-1 flex-col overflow-hidden">
-      <div className="flex items-center gap-3 border-b px-4 py-2.5 lg:px-6">
-        <div className="flex flex-col gap-0.5">
-          <h1 className="text-sm font-semibold leading-tight">{t("title")}</h1>
-          <p className="text-muted-foreground text-xs">{t("subtitle")}</p>
-        </div>
-        {/* 缺口清单：agent 点名调用、但库里没有的 skill —— 直接是该补什么的依据。 */}
-        {missing.length > 0 && (
+    <PageShell
+      title={t("title")}
+      description={t("subtitle")}
+      breadcrumb={[{ label: tn("group.capability"), href: "/dashboard" }, { label: tn("item.skills") }]}
+      actions={
+        /* 缺口清单：agent 点名调用、但库里没有的 skill —— 直接是该补什么的依据。 */
+        missing.length > 0 && (
           <Popover>
             <PopoverTrigger asChild>
-              <Button size="sm" variant="outline" className="ml-auto">
-                <AlertTriangleIcon className="size-3.5 text-amber-700 dark:text-amber-500" />
+              <Button size="sm" variant="outline">
+                <AlertTriangleIcon className="size-3.5 text-destructive" />
                 {t("missingCount", { count: missing.length })}
               </Button>
             </PopoverTrigger>
@@ -861,498 +878,537 @@ export default function SkillsPage() {
               </div>
             </PopoverContent>
           </Popover>
-        )}
-      </div>
-      <div className="flex flex-1 overflow-hidden">
-        {/* ── 左侧文件树 ── */}
-        <div className="flex w-64 shrink-0 flex-col border-r">
-          <div className="flex flex-col gap-2 border-b p-2">
-            <Button size="sm" variant="outline" className="w-full" onClick={() => setNewOpen(true)}>
-              <PlusIcon className="size-3.5" />
-              {t("newSkill")}
-            </Button>
-            <input
-              ref={uploadRef}
-              type="file"
-              accept=".zip,application/zip"
-              className="hidden"
-              onChange={onUploadPick}
-            />
-            <Button
-              size="sm"
-              variant="outline"
-              className="w-full"
-              disabled={uploading}
-              onClick={() => uploadRef.current?.click()}
-              title={t("uploadTitle")}
-            >
-              <UploadIcon className="size-3.5" />
-              {uploading ? t("uploading") : t("uploadZip")}
-            </Button>
-          </div>
-          {/* Radix viewport wraps children in a display:table div that grows with
-              content — force it to block so long names truncate instead of
-              widening the rows past the sidebar. */}
-          <ScrollArea className="flex-1 [&>[data-slot=scroll-area-viewport]>div]:!block">
-            <div className="p-1">
-              {skills.map((s) => {
-                const isOpen = expanded.has(s.name);
-                const tree = buildTree(s.files);
-                const isSkillSelected = selected?.skill === s.name && selected.path === null;
-                return (
-                  <div key={s.name}>
-                    {/* skill 根节点 */}
-                    <div
-                      role="treeitem"
-                      tabIndex={0}
-                      aria-expanded={isOpen}
-                      aria-selected={isSkillSelected}
-                      className={cn(
-                        "group relative flex cursor-pointer select-none items-center gap-1 rounded px-2 py-1 text-sm",
-                        isSkillSelected ? "bg-accent text-accent-foreground" : "hover:bg-muted",
-                      )}
-                      onClick={() => {
-                        toggleExpanded(s.name);
-                        setSelected({ skill: s.name, path: null });
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          toggleExpanded(s.name);
-                          setSelected({ skill: s.name, path: null });
-                        }
-                      }}
-                    >
-                      <ChevronRightIcon
-                        className={cn("size-3.5 shrink-0 transition-transform", isOpen && "rotate-90")}
-                      />
-                      {isOpen ? (
-                        <FolderOpenIcon className="size-3.5 shrink-0 text-blue-700 dark:text-blue-500" />
-                      ) : (
-                        <FolderIcon className="size-3.5 shrink-0 text-blue-700 dark:text-blue-500" />
-                      )}
-                      <span className="min-w-0 flex-1 truncate font-semibold" title={s.name}>
-                        {s.name}
-                      </span>
-                      {s.calls > 0 && (
-                        <span
-                          className="shrink-0 rounded bg-muted px-1 text-[10px] tabular-nums text-muted-foreground"
-                          title={t("callCountTitle", { count: s.calls, last: fmtTime(s.last_used, t("neverCalled")) })}
-                        >
-                          {s.calls}
-                        </span>
-                      )}
-                      <span
-                        className={cn(
-                          "absolute inset-y-0 right-1 hidden items-center gap-0.5 rounded pl-1 group-hover:flex",
-                          isSkillSelected ? "bg-accent" : "bg-muted",
-                        )}
-                      >
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="size-5"
-                          title={t("newFile")}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            startCreate(s.name, "", "file");
-                          }}
-                        >
-                          <FilePlusIcon className="size-3 text-muted-foreground" />
-                        </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="size-5"
-                          title={t("newFolder")}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            startCreate(s.name, "", "dir");
-                          }}
-                        >
-                          <FolderPlusIcon className="size-3 text-muted-foreground" />
-                        </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="size-5"
-                          title={t("deleteSkillAction")}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setPendingDelete({ kind: "skill", skill: s.name });
-                          }}
-                        >
-                          <Trash2Icon className="size-3 text-destructive" />
-                        </Button>
-                      </span>
-                    </div>
-
-                    {/* 展开：递归文件树 */}
-                    {isOpen && (
-                      <>
-                        {renderTree(tree, s.name, 0)}
-                        {creating?.skill === s.name && creating.inDir === "" && inlineInputJSX(22)}
-                      </>
-                    )}
-                  </div>
-                );
-              })}
-
-              {skills.length === 0 && <p className="p-3 text-xs text-muted-foreground">{t("emptySidebar")}</p>}
+        )
+      }
+    >
+      <div data-content-padding="false" className="flex h-full min-h-0 flex-col overflow-hidden">
+        <StateBoundary
+          loading={!loaded}
+          error={
+            error
+              ? {
+                  title: tp("errorTitle"),
+                  detail: tp("errorDetail"),
+                  code: errorCodeOf(lastError.current),
+                  codeLabel: tp("errorCodeLabel"),
+                  retryLabel: tp("retry"),
+                }
+              : null
+          }
+          permission={perm.denied ? "skills:read" : null}
+          permissionProps={{
+            title: tp("permissionTitle"),
+            detail: tp("permissionDetail", { name: tn("item.skills"), ask: tp("askAdmin") }),
+            missingLabel: tp("permissionMissing"),
+            askLabel: tp("permissionAsk"),
+            ask: tp("askAdmin"),
+          }}
+          empty={loaded && !error && skills.length === 0}
+          emptyProps={{
+            title: tp("emptyTitle"),
+            reason: tp("empty.skills"),
+            nextStep: { label: t("newSkill"), onClick: () => setNewOpen(true) },
+          }}
+          skeleton={
+            <div className="space-y-2 p-4">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <div key={i} className="h-10 animate-pulse rounded-md bg-muted" />
+              ))}
             </div>
-          </ScrollArea>
-        </div>
-
-        {/* ── 右侧面板 ── */}
-        <div className="flex flex-1 flex-col overflow-auto p-4">
-          {!selected && (
-            <SkillsOverview
-              skills={skills}
-              missing={missing}
-              onSelect={(name) => setSelected({ skill: name, path: null })}
-            />
-          )}
-
-          {selected && selected.path === null && selectedSkill && (
-            <div className="max-w-5xl space-y-5">
-              <div>
-                <h2 className="font-mono text-base font-semibold">{selectedSkill.name}</h2>
-                {selectedSkill.description && (
-                  <p className="mt-1 text-sm text-muted-foreground">{selectedSkill.description}</p>
-                )}
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {selectedSkill.license && (
-                    <Badge variant="outline" className="text-xs font-normal">
-                      License: {selectedSkill.license}
-                    </Badge>
-                  )}
-                  {selectedSkill.compatibility && (
-                    <Badge variant="secondary" className="text-xs font-normal">
-                      {selectedSkill.compatibility}
-                    </Badge>
-                  )}
-                </div>
-              </div>
-
-              {/* 左右分栏：配置（MCP/可见性）在左为主，调用统计在右为辅。
-                  lg 以下放不下时用 flex-row-reverse 回落到单列——统计因 DOM 顺序在前，
-                  窄屏时自然落到配置上方（与改版前的上下顺序一致）。 */}
-              <div className="flex flex-col gap-6 lg:flex-row-reverse lg:items-start">
-                {/* ── 右侧：调用统计 ── */}
-                <div className="space-y-2 lg:w-80 lg:shrink-0">
-                  <Label className="text-xs text-muted-foreground">{t("callStats")}</Label>
-                  <div className="grid grid-cols-3 gap-2">
-                    <div className="rounded-md border p-2">
-                      <p className="text-lg font-semibold tabular-nums">{selectedSkill.calls}</p>
-                      <p className="text-xs text-muted-foreground">{t("totalCalls")}</p>
-                    </div>
-                    <div className="rounded-md border p-2">
-                      <p className="text-lg font-semibold tabular-nums">{selectedSkill.tasks}</p>
-                      <p className="text-xs text-muted-foreground">{t("coveredTasks")}</p>
-                    </div>
-                    <div className="rounded-md border p-2">
-                      <p
-                        className="truncate text-sm font-medium"
-                        title={fmtTime(selectedSkill.last_used, t("neverCalled"))}
-                      >
-                        {fmtTime(selectedSkill.last_used, t("neverCalled"))}
-                      </p>
-                      <p className="text-xs text-muted-foreground">{t("recent")}</p>
-                    </div>
-                  </div>
-                  {selectedSkill.usage_agents.length > 0 && (
-                    <div className="flex flex-wrap items-center gap-1">
-                      <span className="text-xs text-muted-foreground">{t("callers")}</span>
-                      {selectedSkill.usage_agents.map((k) => (
-                        <Badge key={k} variant="secondary" className="text-xs font-normal">
-                          {k}
-                        </Badge>
-                      ))}
-                    </div>
-                  )}
-                  {usageLoading ? (
-                    <p className="text-xs text-muted-foreground">{t("loadingCalls")}</p>
-                  ) : usageCalls.length > 0 ? (
-                    <div className="rounded-md border">
-                      <div className="border-b px-2 py-1 text-xs text-muted-foreground">
-                        {t("recentCallsCount", { count: usageCalls.length })}
-                      </div>
-                      <div className="max-h-56 overflow-y-auto">
-                        {usageCalls.map((c, i) => (
-                          <div
-                            key={`${c.ts}-${i}`}
-                            className="flex items-center gap-2 border-b px-2 py-1 text-xs last:border-b-0"
-                          >
-                            <span className="tabular-nums text-muted-foreground">
-                              {fmtTime(c.ts, t("neverCalled"))}
-                            </span>
-                            <Badge variant="outline" className="font-normal">
-                              {c.agent_key || "—"}
-                            </Badge>
-                            <span className="ml-auto text-muted-foreground">
-                              {c.task_id > 0 ? t("taskRef", { id: c.task_id }) : c.session_id ? t("sessionRef") : "—"}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ) : (
-                    <p className="text-xs text-muted-foreground">{t("noCallsYet")}</p>
-                  )}
-                </div>
-
-                {/* ── 左侧：关联 MCP + 可见性 ── */}
-                <div className="space-y-5 lg:min-w-0 lg:flex-1">
-                  <div className="space-y-2">
-                    <Label className="text-xs text-muted-foreground">
-                      {t("linkedMcp")}
-                      <span className="ml-1 font-normal">{t("linkedMcpHint")}</span>
-                    </Label>
-                    {mcpOptions.length === 0 ? (
-                      <p className="text-xs text-muted-foreground">{t("noMcp")}</p>
-                    ) : (
-                      <div className="flex flex-wrap gap-x-4 gap-y-2">
-                        {mcpOptions.map((m) => (
-                          <label key={m.id} className="flex cursor-pointer items-center gap-2 text-sm">
-                            <Checkbox
-                              checked={detailMcps.includes(m.name)}
-                              onCheckedChange={(on) => toggleSkillMcp(selectedSkill.name, m.name, !!on)}
-                            />
-                            {m.name}
-                          </label>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label className="text-xs text-muted-foreground">{t("visibility")}</Label>
-                    <div className="space-y-2">
-                      {agents.map((a) => (
-                        <label key={a.key} className="flex cursor-pointer items-center gap-2 text-sm">
-                          <Checkbox
-                            checked={(visibility[selectedSkill.name] ?? []).includes(a.id)}
-                            onCheckedChange={() => toggleVisibility(selectedSkill.name, a.id, agentLabels.name(a))}
-                          />
-                          {agentLabels.name(a)}
-                        </label>
-                      ))}
-                      {agents.length === 0 && <span className="text-xs text-muted-foreground">{t("noAgents")}</span>}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {selected && selected.path !== null && (
-            <div className="flex h-full flex-col gap-2">
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <span className="font-medium text-foreground">{selected.skill}</span>
-                <span>/</span>
-                <span className="font-mono">{selected.path}</span>
-                <Button size="sm" className="ml-auto" onClick={saveFile} disabled={!dirty || saving}>
-                  {saving ? t("saving") : t("save")}
+          }
+          onRetry={load}
+        >
+          <div className="flex h-full min-h-0 flex-1 overflow-hidden">
+            {/* ── 左侧文件树 ── */}
+            <div className="flex w-64 shrink-0 flex-col border-r">
+              <div className="flex flex-col gap-2 border-b p-2">
+                <Button size="sm" variant="outline" className="w-full" onClick={() => setNewOpen(true)}>
+                  <PlusIcon className="size-3.5" />
+                  {t("newSkill")}
+                </Button>
+                <input
+                  ref={uploadRef}
+                  type="file"
+                  accept=".zip,application/zip"
+                  className="hidden"
+                  onChange={onUploadPick}
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="w-full"
+                  disabled={uploading}
+                  onClick={() => uploadRef.current?.click()}
+                  title={t("uploadTitle")}
+                >
+                  <UploadIcon className="size-3.5" />
+                  {uploading ? t("uploading") : t("uploadZip")}
                 </Button>
               </div>
-              {fileLoading ? (
-                <p className="text-xs text-muted-foreground">{t("loading")}</p>
-              ) : (
-                <Textarea
-                  className="flex-1 resize-none font-mono text-xs"
-                  value={fileContent}
-                  onChange={(e) => {
-                    setFileContent(e.target.value);
-                    setDirty(true);
-                  }}
+              {/* Radix viewport wraps children in a display:table div that grows with
+                  content — force it to block so long names truncate instead of
+                  widening the rows past the sidebar. */}
+              <ScrollArea className="flex-1 [&>[data-slot=scroll-area-viewport]>div]:!block">
+                <div className="p-1">
+                  {skills.map((s) => {
+                    const isOpen = expanded.has(s.name);
+                    const tree = buildTree(s.files);
+                    const isSkillSelected = selected?.skill === s.name && selected.path === null;
+                    return (
+                      <div key={s.name}>
+                        {/* skill 根节点 */}
+                        <div
+                          role="treeitem"
+                          tabIndex={0}
+                          aria-expanded={isOpen}
+                          aria-selected={isSkillSelected}
+                          className={cn(
+                            "group relative flex cursor-pointer select-none items-center gap-1 rounded px-2 py-1 text-sm",
+                            isSkillSelected ? "bg-accent text-accent-foreground" : "hover:bg-muted",
+                          )}
+                          onClick={() => {
+                            toggleExpanded(s.name);
+                            setSelected({ skill: s.name, path: null });
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              toggleExpanded(s.name);
+                              setSelected({ skill: s.name, path: null });
+                            }
+                          }}
+                        >
+                          <ChevronRightIcon
+                            className={cn("size-3.5 shrink-0 transition-transform", isOpen && "rotate-90")}
+                          />
+                          {isOpen ? (
+                            <FolderOpenIcon className="size-3.5 shrink-0 text-foreground" />
+                          ) : (
+                            <FolderIcon className="size-3.5 shrink-0 text-foreground" />
+                          )}
+                          <span className="min-w-0 flex-1 truncate font-semibold" title={s.name}>
+                            {s.name}
+                          </span>
+                          {s.calls > 0 && (
+                            <span
+                              className="shrink-0 rounded bg-muted px-1 text-[10px] tabular-nums text-muted-foreground"
+                              title={t("callCountTitle", { count: s.calls, last: fmtTime(s.last_used, t("neverCalled")) })}
+                            >
+                              {s.calls}
+                            </span>
+                          )}
+                          <span
+                            className={cn(
+                              "absolute inset-y-0 right-1 hidden items-center gap-0.5 rounded pl-1 group-hover:flex",
+                              isSkillSelected ? "bg-accent" : "bg-muted",
+                            )}
+                          >
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="size-5"
+                              title={t("newFile")}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                startCreate(s.name, "", "file");
+                              }}
+                            >
+                              <FilePlusIcon className="size-3 text-muted-foreground" />
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="size-5"
+                              title={t("newFolder")}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                startCreate(s.name, "", "dir");
+                              }}
+                            >
+                              <FolderPlusIcon className="size-3 text-muted-foreground" />
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="size-5"
+                              title={t("deleteSkillAction")}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setPendingDelete({ kind: "skill", skill: s.name });
+                              }}
+                            >
+                              <Trash2Icon className="size-3 text-destructive" />
+                            </Button>
+                          </span>
+                        </div>
+
+                        {/* 展开：递归文件树 */}
+                        {isOpen && (
+                          <>
+                            {renderTree(tree, s.name, 0)}
+                            {creating?.skill === s.name && creating.inDir === "" && inlineInputJSX(22)}
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                </div>
+              </ScrollArea>
+            </div>
+
+            {/* ── 右侧面板 ── */}
+            <div className="flex flex-1 flex-col overflow-auto p-4">
+              {!selected && (
+                <SkillsOverview
+                  skills={skills}
+                  missing={missing}
+                  onSelect={(name) => setSelected({ skill: name, path: null })}
                 />
+              )}
+
+              {selected && selected.path === null && selectedSkill && (
+                <div className="max-w-5xl space-y-5">
+                  <div>
+                    <h2 className="font-mono text-base font-semibold">{selectedSkill.name}</h2>
+                    {selectedSkill.description && (
+                      <p className="mt-1 text-sm text-muted-foreground">{selectedSkill.description}</p>
+                    )}
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {selectedSkill.license && (
+                        <Badge variant="outline" className="text-xs font-normal">
+                          License: {selectedSkill.license}
+                        </Badge>
+                      )}
+                      {selectedSkill.compatibility && (
+                        <Badge variant="secondary" className="text-xs font-normal">
+                          {selectedSkill.compatibility}
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 左右分栏：配置（MCP/可见性）在左为主，调用统计在右为辅。
+                      lg 以下放不下时用 flex-row-reverse 回落到单列——统计因 DOM 顺序在前，
+                      窄屏时自然落到配置上方（与改版前的上下顺序一致）。 */}
+                  <div className="flex flex-col gap-6 lg:flex-row-reverse lg:items-start">
+                    {/* ── 右侧：调用统计 ── */}
+                    <div className="space-y-2 lg:w-80 lg:shrink-0">
+                      <Label className="text-xs text-muted-foreground">{t("callStats")}</Label>
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="rounded-md border p-2">
+                          <p className="text-lg font-semibold tabular-nums">{selectedSkill.calls}</p>
+                          <p className="text-xs text-muted-foreground">{t("totalCalls")}</p>
+                        </div>
+                        <div className="rounded-md border p-2">
+                          <p className="text-lg font-semibold tabular-nums">{selectedSkill.tasks}</p>
+                          <p className="text-xs text-muted-foreground">{t("coveredTasks")}</p>
+                        </div>
+                        <div className="rounded-md border p-2">
+                          <p
+                            className="truncate text-sm font-medium"
+                            title={fmtTime(selectedSkill.last_used, t("neverCalled"))}
+                          >
+                            {fmtTime(selectedSkill.last_used, t("neverCalled"))}
+                          </p>
+                          <p className="text-xs text-muted-foreground">{t("recent")}</p>
+                        </div>
+                      </div>
+                      {selectedSkill.usage_agents.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-1">
+                          <span className="text-xs text-muted-foreground">{t("callers")}</span>
+                          {selectedSkill.usage_agents.map((k) => (
+                            <Badge key={k} variant="secondary" className="text-xs font-normal">
+                              {k}
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+                      {usageLoading ? (
+                        <p className="text-xs text-muted-foreground">{t("loadingCalls")}</p>
+                      ) : usageCalls.length > 0 ? (
+                        <div className="rounded-md border">
+                          <div className="border-b px-2 py-1 text-xs text-muted-foreground">
+                            {t("recentCallsCount", { count: usageCalls.length })}
+                          </div>
+                          <div className="max-h-56 overflow-y-auto">
+                            {usageCalls.map((c, i) => (
+                              <div
+                                key={`${c.ts}-${i}`}
+                                className="flex items-center gap-2 border-b px-2 py-1 text-xs last:border-b-0"
+                              >
+                                <span className="tabular-nums text-muted-foreground">
+                                  {fmtTime(c.ts, t("neverCalled"))}
+                                </span>
+                                <Badge variant="outline" className="font-normal">
+                                  {c.agent_key || "—"}
+                                </Badge>
+                                <span className="ml-auto text-muted-foreground">
+                                  {c.task_id > 0 ? t("taskRef", { id: c.task_id }) : c.session_id ? t("sessionRef") : "—"}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">{t("noCallsYet")}</p>
+                      )}
+                    </div>
+
+                    {/* ── 左侧：关联 MCP + 可见性 ── */}
+                    <div className="space-y-5 lg:min-w-0 lg:flex-1">
+                      <div className="space-y-2">
+                        <Label className="text-xs text-muted-foreground">
+                          {t("linkedMcp")}
+                          <span className="ml-1 font-normal">{t("linkedMcpHint")}</span>
+                        </Label>
+                        {mcpOptions.length === 0 ? (
+                          <p className="text-xs text-muted-foreground">{t("noMcp")}</p>
+                        ) : (
+                          <div className="flex flex-wrap gap-x-4 gap-y-2">
+                            {mcpOptions.map((m) => (
+                              <label key={m.id} className="flex cursor-pointer items-center gap-2 text-sm">
+                                <Checkbox
+                                  checked={detailMcps.includes(m.name)}
+                                  onCheckedChange={(on) => toggleSkillMcp(selectedSkill.name, m.name, !!on)}
+                                />
+                                {m.name}
+                              </label>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label className="text-xs text-muted-foreground">{t("visibility")}</Label>
+                        <div className="space-y-2">
+                          {agents.map((a) => (
+                            <label key={a.key} className="flex cursor-pointer items-center gap-2 text-sm">
+                              <Checkbox
+                                checked={(visibility[selectedSkill.name] ?? []).includes(a.id)}
+                                onCheckedChange={() => toggleVisibility(selectedSkill.name, a.id, agentLabels.name(a))}
+                              />
+                              {agentLabels.name(a)}
+                            </label>
+                          ))}
+                          {agents.length === 0 && <span className="text-xs text-muted-foreground">{t("noAgents")}</span>}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {selected && selected.path !== null && (
+                <div className="flex h-full flex-col gap-2">
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <span className="font-medium text-foreground">{selected.skill}</span>
+                    <span>/</span>
+                    <span className="font-mono">{selected.path}</span>
+                    <Button size="sm" className="ml-auto" onClick={saveFile} disabled={!dirty || saving}>
+                      {saving ? t("saving") : t("save")}
+                    </Button>
+                  </div>
+                  {fileLoading ? (
+                    <p className="text-xs text-muted-foreground">{t("loading")}</p>
+                  ) : (
+                    <Textarea
+                      className="flex-1 resize-none font-mono text-xs"
+                      value={fileContent}
+                      onChange={(e) => {
+                        setFileContent(e.target.value);
+                        setDirty(true);
+                      }}
+                    />
+                  )}
+                </div>
               )}
             </div>
-          )}
-        </div>
+          </div>
+        </StateBoundary>
+
+        {/* ── 删除二次确认 ── */}
+        <AlertDialog
+          open={!!pendingDelete}
+          onOpenChange={(o) => {
+            if (!o) setPendingDelete(null);
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {pendingDelete?.kind === "skill" && t("deleteSkillQ", { name: pendingDelete.skill })}
+                {pendingDelete?.kind === "dir" && t("deleteFolderQ", { path: pendingDelete.path })}
+                {pendingDelete?.kind === "file" && t("deleteFileQ", { path: pendingDelete.path })}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {pendingDelete?.kind === "skill"
+                  ? t("deleteSkillDesc")
+                  : pendingDelete?.kind === "dir"
+                    ? t("deleteFolderDesc")
+                    : t("irreversible")}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={deleting}>{t("cancel")}</AlertDialogCancel>
+              <AlertDialogAction
+                disabled={deleting}
+                onClick={(e) => {
+                  e.preventDefault();
+                  void runPendingDelete();
+                }}
+              >
+                {deleting ? t("deleting") : t("delete")}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* ── 新建 Skill 对话框 ── */}
+        <Sheet open={newOpen} onOpenChange={setNewOpen}>
+          <SheetContent side="right" className="flex w-full flex-col gap-0 data-[side=right]:sm:max-w-xl">
+            <SheetHeader className="px-4 pt-4">
+              <SheetTitle>{t("newSkill")}</SheetTitle>
+            </SheetHeader>
+            <Tabs defaultValue="basic" className="flex min-h-0 flex-1 flex-col">
+              <TabsList className="mx-4 mt-3 shrink-0 justify-start">
+                <TabsTrigger value="basic">{t("tabBasic")}</TabsTrigger>
+                <TabsTrigger value="mcp">
+                  {t("linkedMcp")}
+                  {newMcps.length > 0 && (
+                    <span className="ml-1.5 rounded-full bg-primary px-1.5 py-0.5 text-[10px] leading-none text-primary-foreground">
+                      {newMcps.length}
+                    </span>
+                  )}
+                </TabsTrigger>
+                <TabsTrigger value="visibility">
+                  {t("tabVisibility")}
+                  {newVisibility.length > 0 && (
+                    <span className="ml-1.5 rounded-full bg-primary px-1.5 py-0.5 text-[10px] leading-none text-primary-foreground">
+                      {newVisibility.length}
+                    </span>
+                  )}
+                </TabsTrigger>
+              </TabsList>
+
+              {/* 基本信息 */}
+              <TabsContent
+                value="basic"
+                className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pb-4 pt-4 data-[state=inactive]:hidden"
+              >
+                <div className="grid gap-1.5">
+                  <Label htmlFor="sk-name">
+                    {t("nameLabel")} <span className="text-destructive">*</span>
+                  </Label>
+                  <Input
+                    id="sk-name"
+                    placeholder="sqli-deepdive"
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                  />
+                  <p className="text-muted-foreground text-xs">{t("nameHint")}</p>
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="sk-desc">
+                    {t("descLabel")} <span className="text-destructive">*</span>
+                  </Label>
+                  <Textarea
+                    id="sk-desc"
+                    rows={2}
+                    className="resize-none"
+                    placeholder={t("descPlaceholder")}
+                    value={newDesc}
+                    onChange={(e) => setNewDesc(e.target.value)}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="grid gap-1.5">
+                    <Label className="text-muted-foreground text-xs">license</Label>
+                    <Input
+                      placeholder="MIT / Proprietary"
+                      value={newLicense}
+                      onChange={(e) => setNewLicense(e.target.value)}
+                    />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label className="text-muted-foreground text-xs">compatibility</Label>
+                    <Input
+                      placeholder={t("compatPlaceholder")}
+                      value={newCompat}
+                      onChange={(e) => setNewCompat(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="flex min-h-0 flex-1 flex-col gap-1.5">
+                  <Label htmlFor="sk-inst">
+                    {t("bodyLabel")} <span className="text-muted-foreground text-xs font-normal">{t("bodyHint")}</span>
+                  </Label>
+                  <Textarea
+                    id="sk-inst"
+                    className="min-h-40 flex-1 resize-none font-mono text-sm leading-relaxed"
+                    placeholder={t("bodyPlaceholder")}
+                    value={newInst}
+                    onChange={(e) => setNewInst(e.target.value)}
+                  />
+                </div>
+              </TabsContent>
+
+              {/* 关联 MCP */}
+              <TabsContent value="mcp" className="overflow-y-auto px-4 pb-4 pt-4 data-[state=inactive]:hidden">
+                <p className="mb-3 text-xs text-muted-foreground">{t("mcpSheetHint")}</p>
+                {mcpOptions.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">{t("noMcp")}</p>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    {mcpOptions.map((m) => (
+                      <label key={m.id} className="flex cursor-pointer items-center gap-2 text-sm">
+                        <Checkbox
+                          checked={newMcps.includes(m.name)}
+                          onCheckedChange={(on) =>
+                            setNewMcps((cur) => (on ? [...cur, m.name] : cur.filter((n) => n !== m.name)))
+                          }
+                        />
+                        {m.name}
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </TabsContent>
+
+              {/* 可见性 */}
+              <TabsContent value="visibility" className="overflow-y-auto px-4 pb-4 pt-4 data-[state=inactive]:hidden">
+                <p className="mb-3 text-xs text-muted-foreground">{t("visSheetHint")}</p>
+                {agents.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">{t("noAgents")}</p>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    {agents.map((a) => (
+                      <label key={a.key} className="flex cursor-pointer items-center gap-2 text-sm">
+                        <Checkbox
+                          checked={newVisibility.includes(a.id)}
+                          onCheckedChange={(on) =>
+                            setNewVisibility((cur) => (on ? [...cur, a.id] : cur.filter((id) => id !== a.id)))
+                          }
+                        />
+                        {agentLabels.name(a)}
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </TabsContent>
+            </Tabs>
+
+            <SheetFooter className="flex-row justify-end gap-2 border-t px-4 py-3">
+              <Button variant="outline" onClick={() => setNewOpen(false)}>
+                {t("cancel")}
+              </Button>
+              <Button onClick={createNewSkill} disabled={creatingSkill}>
+                {creatingSkill ? t("creating") : t("create")}
+              </Button>
+            </SheetFooter>
+          </SheetContent>
+        </Sheet>
       </div>
-
-      {/* ── 删除二次确认 ── */}
-      <AlertDialog
-        open={!!pendingDelete}
-        onOpenChange={(o) => {
-          if (!o) setPendingDelete(null);
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {pendingDelete?.kind === "skill" && t("deleteSkillQ", { name: pendingDelete.skill })}
-              {pendingDelete?.kind === "dir" && t("deleteFolderQ", { path: pendingDelete.path })}
-              {pendingDelete?.kind === "file" && t("deleteFileQ", { path: pendingDelete.path })}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {pendingDelete?.kind === "skill"
-                ? t("deleteSkillDesc")
-                : pendingDelete?.kind === "dir"
-                  ? t("deleteFolderDesc")
-                  : t("irreversible")}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>{t("cancel")}</AlertDialogCancel>
-            <AlertDialogAction
-              disabled={deleting}
-              onClick={(e) => {
-                e.preventDefault();
-                void runPendingDelete();
-              }}
-            >
-              {deleting ? t("deleting") : t("delete")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* ── 新建 Skill 对话框 ── */}
-      <Sheet open={newOpen} onOpenChange={setNewOpen}>
-        <SheetContent side="right" className="flex w-full flex-col gap-0 data-[side=right]:sm:max-w-xl">
-          <SheetHeader className="px-4 pt-4">
-            <SheetTitle>{t("newSkill")}</SheetTitle>
-          </SheetHeader>
-          <Tabs defaultValue="basic" className="flex min-h-0 flex-1 flex-col">
-            <TabsList className="mx-4 mt-3 shrink-0 justify-start">
-              <TabsTrigger value="basic">{t("tabBasic")}</TabsTrigger>
-              <TabsTrigger value="mcp">
-                {t("linkedMcp")}
-                {newMcps.length > 0 && (
-                  <span className="ml-1.5 rounded-full bg-primary px-1.5 py-0.5 text-[10px] leading-none text-primary-foreground">
-                    {newMcps.length}
-                  </span>
-                )}
-              </TabsTrigger>
-              <TabsTrigger value="visibility">
-                {t("tabVisibility")}
-                {newVisibility.length > 0 && (
-                  <span className="ml-1.5 rounded-full bg-primary px-1.5 py-0.5 text-[10px] leading-none text-primary-foreground">
-                    {newVisibility.length}
-                  </span>
-                )}
-              </TabsTrigger>
-            </TabsList>
-
-            {/* 基本信息 */}
-            <TabsContent
-              value="basic"
-              className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pb-4 pt-4 data-[state=inactive]:hidden"
-            >
-              <div className="grid gap-1.5">
-                <Label htmlFor="sk-name">
-                  {t("nameLabel")} <span className="text-destructive">*</span>
-                </Label>
-                <Input
-                  id="sk-name"
-                  placeholder="sqli-deepdive"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                />
-                <p className="text-muted-foreground text-xs">{t("nameHint")}</p>
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="sk-desc">
-                  {t("descLabel")} <span className="text-destructive">*</span>
-                </Label>
-                <Textarea
-                  id="sk-desc"
-                  rows={2}
-                  className="resize-none"
-                  placeholder={t("descPlaceholder")}
-                  value={newDesc}
-                  onChange={(e) => setNewDesc(e.target.value)}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="grid gap-1.5">
-                  <Label className="text-muted-foreground text-xs">license</Label>
-                  <Input
-                    placeholder="MIT / Proprietary"
-                    value={newLicense}
-                    onChange={(e) => setNewLicense(e.target.value)}
-                  />
-                </div>
-                <div className="grid gap-1.5">
-                  <Label className="text-muted-foreground text-xs">compatibility</Label>
-                  <Input
-                    placeholder={t("compatPlaceholder")}
-                    value={newCompat}
-                    onChange={(e) => setNewCompat(e.target.value)}
-                  />
-                </div>
-              </div>
-              <div className="flex min-h-0 flex-1 flex-col gap-1.5">
-                <Label htmlFor="sk-inst">
-                  {t("bodyLabel")} <span className="text-muted-foreground text-xs font-normal">{t("bodyHint")}</span>
-                </Label>
-                <Textarea
-                  id="sk-inst"
-                  className="min-h-40 flex-1 resize-none font-mono text-sm leading-relaxed"
-                  placeholder={t("bodyPlaceholder")}
-                  value={newInst}
-                  onChange={(e) => setNewInst(e.target.value)}
-                />
-              </div>
-            </TabsContent>
-
-            {/* 关联 MCP */}
-            <TabsContent value="mcp" className="overflow-y-auto px-4 pb-4 pt-4 data-[state=inactive]:hidden">
-              <p className="mb-3 text-xs text-muted-foreground">{t("mcpSheetHint")}</p>
-              {mcpOptions.length === 0 ? (
-                <p className="text-xs text-muted-foreground">{t("noMcp")}</p>
-              ) : (
-                <div className="flex flex-col gap-2">
-                  {mcpOptions.map((m) => (
-                    <label key={m.id} className="flex cursor-pointer items-center gap-2 text-sm">
-                      <Checkbox
-                        checked={newMcps.includes(m.name)}
-                        onCheckedChange={(on) =>
-                          setNewMcps((cur) => (on ? [...cur, m.name] : cur.filter((n) => n !== m.name)))
-                        }
-                      />
-                      {m.name}
-                    </label>
-                  ))}
-                </div>
-              )}
-            </TabsContent>
-
-            {/* 可见性 */}
-            <TabsContent value="visibility" className="overflow-y-auto px-4 pb-4 pt-4 data-[state=inactive]:hidden">
-              <p className="mb-3 text-xs text-muted-foreground">{t("visSheetHint")}</p>
-              {agents.length === 0 ? (
-                <p className="text-xs text-muted-foreground">{t("noAgents")}</p>
-              ) : (
-                <div className="flex flex-col gap-2">
-                  {agents.map((a) => (
-                    <label key={a.key} className="flex cursor-pointer items-center gap-2 text-sm">
-                      <Checkbox
-                        checked={newVisibility.includes(a.id)}
-                        onCheckedChange={(on) =>
-                          setNewVisibility((cur) => (on ? [...cur, a.id] : cur.filter((id) => id !== a.id)))
-                        }
-                      />
-                      {agentLabels.name(a)}
-                    </label>
-                  ))}
-                </div>
-              )}
-            </TabsContent>
-          </Tabs>
-
-          <SheetFooter className="flex-row justify-end gap-2 border-t px-4 py-3">
-            <Button variant="outline" onClick={() => setNewOpen(false)}>
-              {t("cancel")}
-            </Button>
-            <Button onClick={createNewSkill} disabled={creatingSkill}>
-              {creatingSkill ? t("creating") : t("create")}
-            </Button>
-          </SheetFooter>
-        </SheetContent>
-      </Sheet>
-    </div>
+    </PageShell>
   );
 }

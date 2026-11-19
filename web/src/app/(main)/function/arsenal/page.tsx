@@ -5,6 +5,8 @@
 
 import * as React from "react";
 
+import { useTranslations } from "next-intl";
+
 import { Loader2Icon, PlugZapIcon, RefreshCwIcon, SendIcon, ShieldIcon, TerminalIcon, Trash2Icon } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -12,6 +14,12 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { StateBoundary } from "@/components/data/state-boundary";
+import { PageShell } from "@/components/shell/page-shell";
+import { Toolbar } from "@/components/shell/toolbar";
+import { usePermissionDenied } from "@/hooks/use-permission-denied";
+import { ApiError } from "@/lib/api";
+import { errorCodeOf, errorMessageOf } from "@/lib/api-error";
 import { auth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
@@ -26,6 +34,10 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(init?.headers ?? {}) },
   });
   const text = await res.text();
+  if (!res.ok) {
+    // 状态码必须带出来，否则页面没法区分「失败」与「没权限」。
+    throw new ApiError(text.slice(0, 200) || `HTTP ${res.status}`, res.status);
+  }
   try {
     return JSON.parse(text) as T;
   } catch {
@@ -46,7 +58,14 @@ function Panel({ title, children, right }: { title: string; children: React.Reac
 }
 
 export default function ArsenalPage() {
+  const t = useTranslations("nav");
+  const tp = useTranslations("pageStates");
+  const { denied, check, reset } = usePermissionDenied();
+
   const [tab, setTab] = React.useState<"c2" | "shell">("c2");
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+  const lastError = React.useRef<unknown>(null);
 
   // ---- C2 ----
   const [engines, setEngines] = React.useState<Engine[]>([]);
@@ -78,10 +97,27 @@ export default function ArsenalPage() {
     setShells(r.shells ?? []);
   }, []);
 
+  // 首屏加载：原来两个 loader 是裸 void 调用，失败会变成 unhandled rejection
+  // 且界面毫无反应；这里包一层把 loading / error / 403 落到四态上。
+  const load = React.useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    lastError.current = null;
+    reset();
+    try {
+      await Promise.all([loadEngines(), loadShells()]);
+    } catch (e) {
+      lastError.current = e;
+      check(e);
+      setError(errorMessageOf(e));
+    } finally {
+      setLoading(false);
+    }
+  }, [loadEngines, loadShells, check, reset]);
+
   React.useEffect(() => {
-    void loadEngines();
-    void loadShells();
-  }, [loadEngines, loadShells]);
+    void load();
+  }, [load]);
 
   async function createEngine() {
     setBusy("engine");
@@ -173,19 +209,66 @@ export default function ArsenalPage() {
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-center gap-2">
-        <Button variant={tab === "c2" ? "default" : "outline"} size="sm" onClick={() => setTab("c2")}>
-          <PlugZapIcon className="mr-1 size-4" /> C2 会话
-        </Button>
-        <Button variant={tab === "shell" ? "default" : "outline"} size="sm" onClick={() => setTab("shell")}>
-          <ShieldIcon className="mr-1 size-4" /> Webshell
-        </Button>
-        <div className="ml-auto font-mono text-muted-foreground text-xs">
-          {tab === "c2" ? "ENGINE: METASPLOIT RPC" : "ENGINE: SHELL PROTOCOL"}
-        </div>
-      </div>
-
+    <PageShell
+      title={t("item.arsenal")}
+      breadcrumb={[{ label: t("group.capability"), href: "/dashboard" }, { label: t("item.arsenal") }]}
+      actions={
+        <>
+          <Button variant={tab === "c2" ? "default" : "outline"} size="sm" onClick={() => setTab("c2")}>
+            <PlugZapIcon className="mr-1 size-4" /> C2 会话
+          </Button>
+          <Button variant={tab === "shell" ? "default" : "outline"} size="sm" onClick={() => setTab("shell")}>
+            <ShieldIcon className="mr-1 size-4" /> Webshell
+          </Button>
+        </>
+      }
+      toolbar={
+        <Toolbar
+          viewSwitch={
+            <span className="font-mono text-muted-foreground text-xs">
+              {tab === "c2" ? "ENGINE: METASPLOIT RPC" : "ENGINE: SHELL PROTOCOL"}
+            </span>
+          }
+        />
+      }
+    >
+      <div className="px-4 py-3 md:px-6">
+      <StateBoundary
+        loading={loading}
+        error={
+          error
+            ? {
+                title: tp("errorTitle"),
+                detail: tp("errorDetail"),
+                code: errorCodeOf(lastError.current),
+                codeLabel: tp("errorCodeLabel"),
+                retryLabel: tp("retry"),
+              }
+            : null
+        }
+        permission={denied ? "arsenal:read" : null}
+        permissionProps={{
+          title: tp("permissionTitle"),
+          detail: tp("permissionDetail", { name: t("item.arsenal"), ask: tp("askAdmin") }),
+          missingLabel: tp("permissionMissing"),
+          askLabel: tp("permissionAsk"),
+          ask: tp("askAdmin"),
+        }}
+        empty={!loading && !error && engines.length === 0 && shells.length === 0}
+        emptyProps={{ title: tp("emptyTitle"), reason: tp("empty.arsenal") }}
+        onRetry={() => void load()}
+        skeleton={
+          <div className="grid gap-4 lg:grid-cols-[360px_1fr]">
+            {[0, 1].map((i) => (
+              <div key={i} className="space-y-2 rounded-lg border bg-card p-4">
+                {Array.from({ length: 6 }).map((_, j) => (
+                  <div key={j} className="h-9 animate-pulse rounded-md bg-muted" />
+                ))}
+              </div>
+            ))}
+          </div>
+        }
+      >
       {tab === "c2" ? (
         <div className="grid gap-4 lg:grid-cols-[360px_1fr]">
           <div className="flex flex-col gap-4">
@@ -396,6 +479,8 @@ export default function ArsenalPage() {
           </div>
         </div>
       )}
-    </div>
+      </StateBoundary>
+      </div>
+    </PageShell>
   );
 }

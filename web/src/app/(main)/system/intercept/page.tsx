@@ -2,10 +2,13 @@
 
 import * as React from "react";
 
-import { BotIcon, ListFilterIcon, PencilIcon, PlusIcon, ShieldAlertIcon, Trash2Icon } from "lucide-react";
+import { BotIcon, ListFilterIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
+import { StateBoundary } from "@/components/data/state-boundary";
+import { PageShell } from "@/components/shell/page-shell";
+import { Toolbar } from "@/components/shell/toolbar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -19,7 +22,9 @@ import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { usePermissionDenied } from "@/hooks/use-permission-denied";
 import { api } from "@/lib/api";
+import { errorCodeOf } from "@/lib/api-error";
 import { useBuiltinLabels } from "@/lib/builtin-i18n";
 import type {
   InterceptAction,
@@ -61,7 +66,7 @@ function JudgeSparkbars({ daily }: { daily: JudgeDayUsage[] }) {
           <div
             key={d.date}
             title={t("judge.usageBarTitle", { date: d.date, calls: d.calls, tokens: fmtTokens(total) })}
-            className="min-w-[2px] flex-1 rounded-sm bg-violet-500/60 hover:bg-violet-500"
+            className="min-w-[2px] flex-1 rounded-sm bg-foreground/50 hover:bg-foreground/70"
             style={{ height: `${h}%` }}
           />
         );
@@ -125,7 +130,7 @@ function ActionBadge({ action, label }: { action: InterceptAction; label: string
   if (action === "allow") return <Badge variant="secondary">{label}</Badge>;
   if (action === "deny") return <Badge variant="destructive">{label}</Badge>;
   return (
-    <Badge variant="outline" className="border-amber-400 text-amber-600">
+    <Badge variant="outline" className="border-foreground/30 text-foreground">
       {label}
     </Badge>
   );
@@ -230,11 +235,11 @@ function JudgeCard() {
       {/* 使用开关 — 独立强调条 */}
       <div
         className={`flex items-center justify-between gap-3 rounded-lg border px-4 py-3 ${
-          cfg.enabled ? "border-violet-400/50 bg-violet-50/40 dark:bg-violet-950/20" : "bg-muted/40"
+          cfg.enabled ? "border-foreground/30 bg-muted/60" : "bg-muted/40"
         }`}
       >
         <div className="flex items-center gap-2.5">
-          <BotIcon className={`h-5 w-5 shrink-0 ${cfg.enabled ? "text-violet-600" : "text-muted-foreground"}`} />
+          <BotIcon className={`h-5 w-5 shrink-0 ${cfg.enabled ? "text-foreground" : "text-muted-foreground"}`} />
           <div>
             <p className="text-sm font-semibold leading-tight">{t("judge.title")}</p>
             <p className="text-xs text-muted-foreground mt-0.5">
@@ -412,9 +417,17 @@ function JudgeCard() {
 
 export default function InterceptPage() {
   const t = useTranslations("interceptPage");
+  const tn = useTranslations("nav");
+  const tp = useTranslations("pageStates");
+  const perm = usePermissionDenied();
+  // perm 每次渲染都是新对象；只取稳定的 check/reset 引用，避免放进 deps 触发重复取数。
+  const checkPerm = perm.check;
+  const resetPerm = perm.reset;
+  const lastError = React.useRef<unknown>(null);
   const builtinLabels = useBuiltinLabels();
   const [rules, setRules] = React.useState<InterceptRule[]>([]);
   const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
   const [open, setOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<InterceptRule | null>(null);
   const [form, setForm] = React.useState<RuleForm>(defaultForm());
@@ -445,12 +458,16 @@ export default function InterceptPage() {
     try {
       const r = await api.interceptRules();
       setRules(r);
-    } catch {
+      setError(null);
+    } catch (e) {
+      lastError.current = e;
+      checkPerm(e);
+      setError(e instanceof Error ? e.message : "load failed");
       toast.error(t("toast.loadRulesFailed"));
     } finally {
       setLoading(false);
     }
-  }, [t]);
+  }, [t, checkPerm]);
 
   React.useEffect(() => {
     void load();
@@ -626,149 +643,171 @@ export default function InterceptPage() {
   // ---- render ----
 
   return (
-    <div className="flex flex-1 flex-col gap-5 p-6">
-      {/* ---- header ---- */}
-      <div className="flex items-center gap-2.5">
-        <ShieldAlertIcon className="h-5 w-5 shrink-0" />
-        <div>
-          <h1 className="text-xl font-semibold leading-tight">{t("title")}</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">{t("subtitle")}</p>
-        </div>
-      </div>
-
-      {/* ---- 拦截范围信息条（规则比对与模型回退共用：范围外的工具两者均不介入） ---- */}
-      <div
-        className={`flex items-center justify-between gap-3 rounded-lg border px-4 py-2.5 ${
-          scopeTools.length === 0 ? "border-amber-400/60 bg-amber-50/50 dark:bg-amber-950/20" : "bg-muted/40"
-        }`}
-      >
-        <div className="flex min-w-0 items-center gap-2 text-sm">
-          <ListFilterIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
-          <span className="shrink-0 font-medium">{t("scope.label")}</span>
-          {scopeTools.length === 0 ? (
-            <span className="text-amber-700 dark:text-amber-500">{t("scope.empty")}</span>
-          ) : (
-            <>
-              <Badge variant="secondary" className="shrink-0">
-                {t("scope.toolCount", { count: scopeTools.length })}
-              </Badge>
-              <span className="truncate text-muted-foreground" title={scopeTools.join(" · ")}>
-                {scopeTools.join(" · ")}
-              </span>
-            </>
-          )}
-        </div>
-        <Button
-          variant={scopeTools.length === 0 ? "default" : "outline"}
-          size="sm"
-          className="shrink-0"
-          onClick={openScope}
-        >
-          <ListFilterIcon className="h-4 w-4" />
-          {t("scope.adjust")}
-        </Button>
-      </div>
-
-      <Tabs defaultValue="rules" className="flex-1">
-        <TabsList>
-          <TabsTrigger value="rules">{t("tab.rules")}</TabsTrigger>
-          <TabsTrigger value="judge">{t("tab.model")}</TabsTrigger>
-        </TabsList>
-
-        {/* ---- tab: rules ---- */}
-        <TabsContent value="rules" className="mt-4 flex flex-col gap-4">
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-xs text-muted-foreground">{t("rules.priorityHint")}</p>
-            <Button onClick={openNew} size="sm" className="shrink-0">
-              <PlusIcon className="h-4 w-4" />
-              {t("rules.add")}
-            </Button>
-          </div>
-
-          <Card>
-            <CardContent className="p-0">
-              {loading ? (
-                <p className="p-6 text-sm text-muted-foreground">{t("rules.loading")}</p>
-              ) : rules.length === 0 ? (
-                <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
-                  <ShieldAlertIcon className="h-8 w-8 text-muted-foreground/40" />
-                  <p className="text-sm text-muted-foreground">{t("rules.empty")}</p>
-                  <Button size="sm" variant="outline" onClick={openNew}>
-                    <PlusIcon className="h-4 w-4" />
-                    {t("rules.addFirst")}
-                  </Button>
-                </div>
+    <PageShell
+      title={t("title")}
+      description={t("subtitle")}
+      breadcrumb={[{ label: tn("group.govern"), href: "/dashboard" }, { label: tn("item.intercept") }]}
+      toolbar={
+        <Toolbar
+          filters={
+            <div className="flex min-w-0 flex-1 items-center gap-2 text-sm">
+              <ListFilterIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="shrink-0 font-medium">{t("scope.label")}</span>
+              {scopeTools.length === 0 ? (
+                <span className="text-destructive">{t("scope.empty")}</span>
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow className="hover:bg-transparent">
-                      <TableHead className="w-[72px]">{t("rules.colPriority")}</TableHead>
-                      <TableHead>{t("rules.colName")}</TableHead>
-                      <TableHead className="w-[90px]">{t("rules.colTarget")}</TableHead>
-                      <TableHead className="w-[80px]">{t("rules.colType")}</TableHead>
-                      <TableHead>{t("rules.colPattern")}</TableHead>
-                      <TableHead className="w-[72px]">{t("rules.colAction")}</TableHead>
-                      <TableHead className="w-[64px] text-center">{t("rules.colEnabled")}</TableHead>
-                      <TableHead className="w-[80px]" />
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {rules.map((rule) => (
-                      <TableRow key={rule.id} className={!rule.enabled ? "opacity-40" : ""}>
-                        <TableCell>
-                          <span className="font-mono text-xs tabular-nums">{rule.priority}</span>
-                        </TableCell>
-                        <TableCell className="font-medium text-sm">{builtinLabels.ruleName(rule.name)}</TableCell>
-                        <TableCell>
-                          <span className="text-xs text-muted-foreground">
-                            {rule.match_target === "tool_name" ? t("target.tool_name") : t("target.tool_input")}
-                          </span>
-                        </TableCell>
-                        <TableCell>
-                          <span className="text-xs text-muted-foreground">
-                            {rule.match_type === "regex" ? t("matchType.regex") : t("matchType.string")}
-                          </span>
-                        </TableCell>
-                        <TableCell className="max-w-[220px]">
-                          <code className="block truncate rounded bg-muted px-1.5 py-0.5 text-xs font-mono">
-                            {rule.pattern}
-                          </code>
-                        </TableCell>
-                        <TableCell>
-                          <ActionBadge action={rule.action} label={t(`action.${rule.action}`)} />
-                        </TableCell>
-                        <TableCell className="text-center">
-                          <Switch checked={rule.enabled} onCheckedChange={() => handleToggle(rule)} />
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center justify-end gap-0.5">
-                            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(rule)}>
-                              <PencilIcon className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              className="h-7 w-7 text-destructive hover:text-destructive"
-                              onClick={() => handleDelete(rule.id)}
-                            >
-                              <Trash2Icon className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                <>
+                  <Badge variant="secondary" className="shrink-0">
+                    {t("scope.toolCount", { count: scopeTools.length })}
+                  </Badge>
+                  <span className="truncate text-muted-foreground" title={scopeTools.join(" · ")}>
+                    {scopeTools.join(" · ")}
+                  </span>
+                </>
               )}
-            </CardContent>
-          </Card>
-        </TabsContent>
+            </div>
+          }
+          viewSwitch={
+            <Button
+              variant={scopeTools.length === 0 ? "default" : "outline"}
+              size="sm"
+              className="shrink-0"
+              onClick={openScope}
+            >
+              <ListFilterIcon className="h-4 w-4" />
+              {t("scope.adjust")}
+            </Button>
+          }
+        />
+      }
+      contentClassName="px-4 py-3 md:px-6"
+    >
+      <StateBoundary
+        loading={loading}
+        error={
+          error
+            ? {
+                title: tp("errorTitle"),
+                detail: tp("errorDetail"),
+                code: errorCodeOf(lastError.current),
+                codeLabel: tp("errorCodeLabel"),
+                retryLabel: tp("retry"),
+              }
+            : null
+        }
+        permission={perm.denied ? "intercept:read" : null}
+        permissionProps={{
+          title: tp("permissionTitle"),
+          detail: tp("permissionDetail", { name: tn("item.intercept"), ask: tp("askAdmin") }),
+          missingLabel: tp("permissionMissing"),
+          askLabel: tp("permissionAsk"),
+          ask: tp("askAdmin"),
+        }}
+        skeleton={<div className="h-64 animate-pulse rounded-xl bg-muted" />}
+        onRetry={() => {
+          setError(null);
+          lastError.current = null;
+          resetPerm();
+          void load();
+        }}
+      >
+        <Tabs defaultValue="rules" className="flex-1">
+          <TabsList>
+            <TabsTrigger value="rules">{t("tab.rules")}</TabsTrigger>
+            <TabsTrigger value="judge">{t("tab.model")}</TabsTrigger>
+          </TabsList>
 
-        {/* ---- tab: model ---- */}
-        <TabsContent value="judge" className="mt-4">
-          <JudgeCard />
-        </TabsContent>
-      </Tabs>
+          {/* ---- tab: rules ---- */}
+          <TabsContent value="rules" className="mt-4 flex flex-col gap-4">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs text-muted-foreground">{t("rules.priorityHint")}</p>
+              <Button onClick={openNew} size="sm" className="shrink-0">
+                <PlusIcon className="h-4 w-4" />
+                {t("rules.add")}
+              </Button>
+            </div>
+
+            <StateBoundary
+              empty={!loading && rules.length === 0}
+              emptyProps={{
+                title: tp("emptyTitle"),
+                reason: tp("empty.intercept"),
+                nextStep: { label: t("rules.add"), onClick: openNew },
+              }}
+            >
+              <Card>
+                <CardContent className="p-0">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="hover:bg-transparent">
+                        <TableHead className="w-[72px]">{t("rules.colPriority")}</TableHead>
+                        <TableHead>{t("rules.colName")}</TableHead>
+                        <TableHead className="w-[90px]">{t("rules.colTarget")}</TableHead>
+                        <TableHead className="w-[80px]">{t("rules.colType")}</TableHead>
+                        <TableHead>{t("rules.colPattern")}</TableHead>
+                        <TableHead className="w-[72px]">{t("rules.colAction")}</TableHead>
+                        <TableHead className="w-[64px] text-center">{t("rules.colEnabled")}</TableHead>
+                        <TableHead className="w-[80px]" />
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {rules.map((rule) => (
+                        <TableRow key={rule.id} className={!rule.enabled ? "opacity-40" : ""}>
+                          <TableCell>
+                            <span className="font-mono text-xs tabular-nums">{rule.priority}</span>
+                          </TableCell>
+                          <TableCell className="font-medium text-sm">{builtinLabels.ruleName(rule.name)}</TableCell>
+                          <TableCell>
+                            <span className="text-xs text-muted-foreground">
+                              {rule.match_target === "tool_name" ? t("target.tool_name") : t("target.tool_input")}
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            <span className="text-xs text-muted-foreground">
+                              {rule.match_type === "regex" ? t("matchType.regex") : t("matchType.string")}
+                            </span>
+                          </TableCell>
+                          <TableCell className="max-w-[220px]">
+                            <code className="block truncate rounded bg-muted px-1.5 py-0.5 text-xs font-mono">
+                              {rule.pattern}
+                            </code>
+                          </TableCell>
+                          <TableCell>
+                            <ActionBadge action={rule.action} label={t(`action.${rule.action}`)} />
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <Switch checked={rule.enabled} onCheckedChange={() => handleToggle(rule)} />
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center justify-end gap-0.5">
+                              <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(rule)}>
+                                <PencilIcon className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-7 w-7 text-destructive hover:text-destructive"
+                                onClick={() => handleDelete(rule.id)}
+                              >
+                                <Trash2Icon className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            </StateBoundary>
+          </TabsContent>
+
+          {/* ---- tab: model ---- */}
+          <TabsContent value="judge" className="mt-4">
+            <JudgeCard />
+          </TabsContent>
+        </Tabs>
+      </StateBoundary>
 
       {/* ---- editor sheet ---- */}
       <Sheet open={open} onOpenChange={setOpen}>
@@ -833,7 +872,7 @@ export default function InterceptPage() {
               />
               {regexErr && <p className="text-xs text-destructive mt-1">{regexErr}</p>}
               {regexWarn && (
-                <p className="text-xs text-amber-600 mt-1">
+                <p className="mt-1 text-xs text-muted-foreground">
                   {t.rich("editor.regexWarn", { code: (c) => <code className="font-mono">{c}</code> })}
                 </p>
               )}
@@ -993,6 +1032,6 @@ export default function InterceptPage() {
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+    </PageShell>
   );
 }

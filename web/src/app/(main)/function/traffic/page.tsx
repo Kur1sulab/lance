@@ -18,8 +18,11 @@ import {
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
+import { StateBoundary } from "@/components/data/state-boundary";
 import { HttpCodeBlock } from "@/components/http-code-block";
 import { LinkTrafficDialog } from "@/components/link-traffic-dialog";
+import { PageShell } from "@/components/shell/page-shell";
+import { Toolbar } from "@/components/shell/toolbar";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -43,7 +46,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { getDateLocale } from "@/i18n/datetime";
+import { usePermissionDenied } from "@/hooks/use-permission-denied";
 import { api } from "@/lib/api";
+import { errorCodeOf, errorMessageOf } from "@/lib/api-error";
 import { useStoredSortPreference } from "@/lib/sort-preference";
 import type { TrafficDetail, TrafficExchange, TrafficHost, TrafficResp } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -69,10 +74,10 @@ function fmtBytes(n: number) {
 }
 
 function statusTone(status: number) {
-  if (status >= 500) return "text-red-700 dark:text-red-500";
-  if (status >= 400) return "text-amber-700 dark:text-amber-500";
-  if (status >= 300) return "text-blue-700 dark:text-blue-500";
-  if (status >= 200) return "text-emerald-700 dark:text-emerald-500";
+  if (status >= 500) return "text-destructive";
+  if (status >= 400) return "text-destructive/80";
+  if (status >= 300) return "text-muted-foreground";
+  if (status >= 200) return "text-foreground";
   return "text-muted-foreground";
 }
 
@@ -116,6 +121,9 @@ const STATUS_BUCKETS = ["2xx", "3xx", "4xx", "5xx"];
 export default function TrafficPage() {
   const t = useTranslations("traffic");
   const tp = useTranslations("pagination");
+  const tn = useTranslations("nav");
+  const tps = useTranslations("pageStates");
+  const { denied, check: checkPermission, reset: resetPermission } = usePermissionDenied();
   const [selectedFlows, setSelectedFlows] = React.useState<Set<string>>(() => new Set());
   const [linking, setLinking] = React.useState(false);
   const [page, setPage] = React.useState(0);
@@ -141,6 +149,10 @@ export default function TrafficPage() {
   const [sort, setSort] = useStoredSortPreference<SortField>(SORT_STORAGE_KEY, SORT_FIELDS, "ts", "desc");
 
   const [traffic, setTraffic] = React.useState<TrafficResp | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
+  const lastError = React.useRef<unknown>(null);
+  // 轮询失败要保留上一份成功快照，所以「有没有数据」也记在 ref 里，避免误进错误态。
+  const trafficRef = React.useRef<TrafficResp | null>(null);
   const [selected, setSelected] = React.useState<TrafficExchange | null>(null);
   const [detail, setDetail] = React.useState<TrafficDetail | null>(null);
   const [detailLoading, setDetailLoading] = React.useState(false);
@@ -216,10 +228,16 @@ export default function TrafficPage() {
           order: sort.direction,
         })
         .then((r) => {
-          if (alive) setTraffic(r);
+          if (!alive) return;
+          trafficRef.current = r;
+          setTraffic(r);
+          setError(null);
         })
-        .catch(() => {
-          // Keep the last successful snapshot during transient refresh failures.
+        .catch((e) => {
+          // 保留上一次成功快照：只有还没拿到任何数据时才进入错误态。
+          lastError.current = e;
+          checkPermission(e);
+          if (!trafficRef.current) setError(errorMessageOf(e));
         });
       api
         .trafficHosts()
@@ -239,7 +257,7 @@ export default function TrafficPage() {
       alive = false;
       clearInterval(t);
     };
-  }, [page, size, hostQ, method, queryQ, bodyQ, pathQ, statusFilter, respMinQ, respMaxQ, sort, reloadTick]);
+  }, [page, size, hostQ, method, queryQ, bodyQ, pathQ, statusFilter, respMinQ, respMaxQ, sort, reloadTick, checkPermission]);
 
   // Delete traffic for the current host filter (substring) or the checked
   // hosts (exact batch), then refetch.
@@ -344,18 +362,17 @@ export default function TrafficPage() {
   const rangeEnd = page * size + exchanges.length;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">{t("title")}</h1>
-          <p className="text-muted-foreground text-sm">{t("subtitle")}</p>
-        </div>
-        <div className="flex items-center gap-4 text-sm">
+    <PageShell
+      title={t("title")}
+      description={t("subtitle")}
+      breadcrumb={[{ label: tn("group.observe"), href: "/dashboard" }, { label: tn("item.traffic") }]}
+      actions={
+        <div className="flex items-center gap-3 text-sm">
           <span
             className={cn(
               "inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-medium",
               traffic?.enabled
-                ? "border-emerald-500/20 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                ? "border-border bg-muted text-foreground"
                 : "border-transparent bg-muted text-muted-foreground",
             )}
           >
@@ -369,10 +386,11 @@ export default function TrafficPage() {
             })}
           </span>
         </div>
-      </div>
-
-      {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-2">
+      }
+      toolbar={
+        <Toolbar
+          filters={
+            <>
         <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
           <PopoverTrigger asChild>
             <Button variant="outline" size="sm" className="h-8">
@@ -551,7 +569,12 @@ export default function TrafficPage() {
             <ChevronRightIcon />
           </Button>
         </div>
-      </div>
+            </>
+          }
+        />
+      }
+    >
+      <div className="flex flex-col gap-3 px-4 py-3 md:px-6">
 
       {/* Advanced filters (issue #177): narrow 660k+ exchanges down to the one packet. */}
       <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 px-2 py-1.5">
@@ -625,6 +648,36 @@ export default function TrafficPage() {
         ) : null}
       </div>
       {/* History table */}
+        <StateBoundary
+          loading={traffic === null && !error}
+          error={
+            error
+              ? {
+                  title: tps("errorTitle"),
+                  detail: tps("errorDetail"),
+                  code: errorCodeOf(lastError.current),
+                  codeLabel: tps("errorCodeLabel"),
+                  retryLabel: tps("retry"),
+                }
+              : null
+          }
+          permission={denied ? "traffic:read" : null}
+          permissionProps={{
+            title: tps("permissionTitle"),
+            detail: tps("permissionDetail", { name: tn("item.traffic"), ask: tps("askAdmin") }),
+            missingLabel: tps("permissionMissing"),
+            askLabel: tps("permissionAsk"),
+            ask: tps("askAdmin"),
+          }}
+          empty={!error && traffic !== null && exchanges.length === 0}
+          emptyProps={{ title: tps("emptyTitle"), reason: tps("empty.traffic") }}
+          onRetry={() => {
+            setError(null);
+            lastError.current = null;
+            resetPermission();
+            setReloadTick((n) => n + 1);
+          }}
+        >
       <div className="flex h-[calc(100vh-15rem)] min-h-0 flex-col">
         <Card className="flex min-h-0 flex-1 flex-col overflow-hidden py-0">
           <div className="min-h-0 flex-1 overflow-auto">
@@ -717,17 +770,12 @@ export default function TrafficPage() {
                     <TableCell className="text-right text-xs tabular-nums">{fmtBytes(e.resp_len)}</TableCell>
                   </TableRow>
                 ))}
-                {exchanges.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={8} className="py-12 text-center text-sm text-muted-foreground">
-                      {traffic === null ? t("table.loading") : t("table.empty")}
-                    </TableCell>
-                  </TableRow>
-                )}
               </TableBody>
             </Table>
           </div>
         </Card>
+          </div>
+        </StateBoundary>
       </div>
 
       {linking ? (
@@ -832,6 +880,6 @@ export default function TrafficPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </PageShell>
   );
 }

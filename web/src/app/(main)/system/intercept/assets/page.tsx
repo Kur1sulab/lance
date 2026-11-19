@@ -2,10 +2,12 @@
 
 import * as React from "react";
 
-import { BanIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
+import { PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
+import { StateBoundary } from "@/components/data/state-boundary";
+import { PageShell } from "@/components/shell/page-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -17,7 +19,9 @@ import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetT
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { usePermissionDenied } from "@/hooks/use-permission-denied";
 import { api } from "@/lib/api";
+import { errorCodeOf } from "@/lib/api-error";
 import { useBuiltinLabels } from "@/lib/builtin-i18n";
 import type { AssetInterceptKind, AssetInterceptRule } from "@/lib/types";
 
@@ -46,10 +50,10 @@ function KindBadge({ kind, label }: { kind: AssetInterceptKind; label: string })
       variant="outline"
       className={
         cidr
-          ? "border-sky-400 text-sky-600"
+          ? "border-border font-mono text-muted-foreground"
           : fuzzy
-            ? "border-amber-400 text-amber-600"
-            : "border-emerald-400 text-emerald-600"
+            ? "border-border border-dashed text-foreground"
+            : "border-border bg-muted text-foreground"
       }
     >
       {label}
@@ -94,9 +98,14 @@ function frontValidate(form: RuleForm): "contentRequired" | "cidrInvalid" | null
 export default function AssetInterceptPage() {
   const t = useTranslations("assetInterceptPage");
   const tr = useTranslations("assetInterceptRules");
+  const tn = useTranslations("nav");
+  const tp = useTranslations("pageStates");
+  const { denied, check: checkPermission, reset: resetPermission } = usePermissionDenied();
   const builtinLabels = useBuiltinLabels();
   const [rules, setRules] = React.useState<AssetInterceptRule[]>([]);
   const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+  const lastError = React.useRef<unknown>(null);
   const [open, setOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<AssetInterceptRule | null>(null);
   const [form, setForm] = React.useState<RuleForm>(defaultForm());
@@ -105,12 +114,16 @@ export default function AssetInterceptPage() {
   const load = React.useCallback(async () => {
     try {
       setRules(await api.assetInterceptRules());
-    } catch {
+      setError(null);
+    } catch (e) {
+      lastError.current = e;
+      checkPermission(e);
+      setError((e as Error).message || t("toast.loadFailed"));
       toast.error(t("toast.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, [t]);
+  }, [t, checkPermission]);
 
   React.useEffect(() => {
     void load();
@@ -180,38 +193,55 @@ export default function AssetInterceptPage() {
   const placeholder = KIND_OPTIONS.find((o) => o.value === form.kind)?.placeholder ?? "";
 
   return (
-    <div className="flex flex-1 flex-col gap-5 p-6">
-      {/* header */}
-      <div className="flex items-center gap-2.5">
-        <BanIcon className="h-5 w-5 shrink-0" />
-        <div>
-          <h1 className="text-lg font-semibold leading-tight">{t("title")}</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">{t("subtitle")}</p>
-        </div>
-      </div>
-
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-xs text-muted-foreground">{t("intro")}</p>
+    <PageShell
+      title={t("title")}
+      description={t("subtitle")}
+      breadcrumb={[{ label: tn("group.govern"), href: "/dashboard" }, { label: tn("item.asset-intercept") }]}
+      actions={
         <Button onClick={openNew} size="sm" className="shrink-0">
           <PlusIcon className="h-4 w-4" />
           {t("add")}
         </Button>
-      </div>
-
+      }
+    >
+      <div className="flex flex-col gap-4 px-4 py-3 md:px-6">
+        <p className="text-muted-foreground text-xs">{t("intro")}</p>
+        <StateBoundary
+          loading={loading}
+          error={
+            error
+              ? {
+                  title: tp("errorTitle"),
+                  detail: tp("errorDetail"),
+                  code: errorCodeOf(lastError.current),
+                  codeLabel: tp("errorCodeLabel"),
+                  retryLabel: tp("retry"),
+                }
+              : null
+          }
+          permission={denied ? "interceptAssets:read" : null}
+          permissionProps={{
+            title: tp("permissionTitle"),
+            detail: tp("permissionDetail", { name: tn("item.asset-intercept"), ask: tp("askAdmin") }),
+            missingLabel: tp("permissionMissing"),
+            askLabel: tp("permissionAsk"),
+            ask: tp("askAdmin"),
+          }}
+          empty={!loading && !error && rules.length === 0}
+          emptyProps={{
+            title: tp("emptyTitle"),
+            reason: tp("empty.interceptAssets"),
+            nextStep: { label: t("addFirst"), onClick: openNew },
+          }}
+          onRetry={() => {
+            setError(null);
+            lastError.current = null;
+            resetPermission();
+            void load();
+          }}
+        >
       <Card>
         <CardContent className="p-0">
-          {loading ? (
-            <p className="p-6 text-sm text-muted-foreground">{t("loading")}</p>
-          ) : rules.length === 0 ? (
-            <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
-              <BanIcon className="h-8 w-8 text-muted-foreground/40" />
-              <p className="text-sm text-muted-foreground">{t("empty")}</p>
-              <Button size="sm" variant="outline" onClick={openNew}>
-                <PlusIcon className="h-4 w-4" />
-                {t("addFirst")}
-              </Button>
-            </div>
-          ) : (
             <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
@@ -265,9 +295,11 @@ export default function AssetInterceptPage() {
                 ))}
               </TableBody>
             </Table>
-          )}
         </CardContent>
       </Card>
+        </StateBoundary>
+      </div>
+
 
       {/* editor sheet */}
       <Sheet open={open} onOpenChange={setOpen}>
@@ -347,6 +379,6 @@ export default function AssetInterceptPage() {
           </SheetFooter>
         </SheetContent>
       </Sheet>
-    </div>
+    </PageShell>
   );
 }

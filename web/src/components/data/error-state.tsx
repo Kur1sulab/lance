@@ -10,6 +10,8 @@ export interface ErrorStateProps {
   title: string;
   detail?: string;
   code?: string | number;
+  /** 「错误码」标签；调用方传 i18n 文案 */
+  codeLabel?: string;
   onRetry?: () => void;
   retryLabel?: string;
   className?: string;
@@ -20,6 +22,7 @@ export function ErrorState({
   title,
   detail,
   code,
+  codeLabel = "错误码",
   onRetry,
   retryLabel = "重试",
   className,
@@ -45,7 +48,7 @@ export function ErrorState({
       ) : null}
       {code !== undefined && code !== null ? (
         <p className="font-mono text-[10px] text-muted-foreground uppercase tracking-[0.14em]">
-          错误码 {code}
+          {codeLabel} {code}
         </p>
       ) : null}
       {children}

@@ -4,9 +4,14 @@ import * as React from "react";
 
 import { useTranslations } from "next-intl";
 
+import { StateBoundary } from "@/components/data/state-boundary";
+import { PageShell } from "@/components/shell/page-shell";
+import { Toolbar } from "@/components/shell/toolbar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { sseUrl } from "@/lib/api";
+import { usePermissionDenied } from "@/hooks/use-permission-denied";
+import { ApiError, sseUrl } from "@/lib/api";
+import { errorCodeOf } from "@/lib/api-error";
 import { MOCK } from "@/lib/mock/enabled";
 import type { LogLine } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -57,15 +62,16 @@ const MOCK_LOGS: LogLine[] = [
   },
 ];
 
+// 只用语义 token：warn 走 muted，error 走 destructive（不写死色值）。
 const levelTone: Record<LogLine["level"], string> = {
   info: "text-foreground/80",
-  warn: "text-amber-600 dark:text-amber-400",
-  error: "text-red-600 dark:text-red-400",
+  warn: "text-muted-foreground",
+  error: "text-destructive",
 };
 const levelDot: Record<LogLine["level"], string> = {
   info: "bg-muted-foreground/40",
-  warn: "bg-amber-500",
-  error: "bg-red-500",
+  warn: "bg-muted-foreground",
+  error: "bg-destructive",
 };
 
 function fmtTime(ts: string) {
@@ -77,12 +83,19 @@ function fmtTime(ts: string) {
 
 export default function LogsPage() {
   const t = useTranslations("logsPage");
+  const tn = useTranslations("nav");
+  const tp = useTranslations("pageStates");
+  const perm = usePermissionDenied();
+
   const [lines, setLines] = React.useState<LogLine[]>([]);
   const [q, setQ] = React.useState("");
   const [level, setLevel] = React.useState<"all" | LogLine["level"]>("all");
   const [paused, setPaused] = React.useState(false);
   const [loadingHistory, setLoadingHistory] = React.useState(false);
+  const [loaded, setLoaded] = React.useState(MOCK);
+  const [error, setError] = React.useState<string | null>(null);
   const [hasMore, setHasMore] = React.useState(false);
+  const lastError = React.useRef<unknown>(null);
   const bottom = React.useRef<HTMLDivElement>(null);
   const stick = React.useRef(true);
   const pausedRef = React.useRef(false);
@@ -105,7 +118,9 @@ export default function LogsPage() {
       return;
     }
     const es = new EventSource(sseUrl("/api/logs/stream?since=0"));
+    es.onopen = () => setLoaded(true);
     es.onmessage = (e) => {
+      setLoaded(true);
       if (pausedRef.current) return;
       try {
         const l = JSON.parse(e.data) as LogLine;
@@ -128,7 +143,14 @@ export default function LogsPage() {
     try {
       const params = minDbId > 0 ? `?before=${minDbId}&limit=200` : `?limit=200`;
       const res = await fetch(`/api/logs/history${params}`);
-      if (!res.ok) return;
+      if (!res.ok) {
+        // 原来这里静默 return，用户只看到「点了没反应」——错误态就是要把它说出来。
+        const err = new ApiError(`GET /logs/history: ${res.status}`, res.status);
+        lastError.current = err;
+        perm.check(err);
+        setError(err.message);
+        return;
+      }
       const data = (await res.json()) as { items: LogLine[]; has_more: boolean };
       if (data.items?.length) {
         // Assign synthetic seq numbers below current minimum to keep dedup working.
@@ -181,91 +203,148 @@ export default function LogsPage() {
   }, [lines]);
 
   return (
-    <div className="flex flex-1 flex-col gap-3">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight">{t("title")}</h1>
-        <p className="text-muted-foreground text-sm">{t("subtitle")}</p>
-      </div>
-      <div className="flex flex-1 flex-col gap-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <Input
-            placeholder={t("filterPlaceholder")}
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            className="h-8 max-w-xs"
-          />
-          <div className="flex gap-1">
-            {(["all", "info", "warn", "error"] as const).map((lv) => (
+    <PageShell
+      title={t("title")}
+      description={t("subtitle")}
+      breadcrumb={[{ label: tn("group.govern"), href: "/dashboard" }, { label: tn("item.logs") }]}
+      toolbar={
+        <Toolbar
+          search={
+            <Input
+              placeholder={t("filterPlaceholder")}
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              className="h-8"
+            />
+          }
+          filters={
+            <>
+              <div className="flex gap-1">
+                {(["all", "info", "warn", "error"] as const).map((lv) => (
+                  <Button
+                    key={lv}
+                    size="sm"
+                    variant={level === lv ? "default" : "outline"}
+                    className="h-8"
+                    onClick={() => setLevel(lv)}
+                  >
+                    {lv === "all" ? t("all") : lv}
+                  </Button>
+                ))}
+              </div>
               <Button
-                key={lv}
                 size="sm"
-                variant={level === lv ? "default" : "outline"}
+                variant={paused ? "default" : "outline"}
                 className="h-8"
-                onClick={() => setLevel(lv)}
+                onClick={() => setPaused((p) => !p)}
               >
-                {lv === "all" ? t("all") : lv}
+                {paused ? t("paused") : t("pause")}
               </Button>
-            ))}
-          </div>
-          <Button
-            size="sm"
-            variant={paused ? "default" : "outline"}
-            className="h-8"
-            onClick={() => setPaused((p) => !p)}
-          >
-            {paused ? t("paused") : t("pause")}
-          </Button>
-          <Button size="sm" variant="outline" className="h-8" onClick={() => setLines([])}>
-            {t("clear")}
-          </Button>
-          <span className="ml-auto text-xs text-muted-foreground">
-            {t("totalLines", { count: counts.total })} ·{" "}
-            <span className="text-amber-600 dark:text-amber-400">{t("warnCount", { count: counts.warn })}</span> ·{" "}
-            <span className="text-red-600 dark:text-red-400">{t("errorCount", { count: counts.error })}</span>
-          </span>
-        </div>
-
-        <div
-          onScroll={(e) => {
-            const el = e.currentTarget;
-            stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+              <Button size="sm" variant="outline" className="h-8" onClick={() => setLines([])}>
+                {t("clear")}
+              </Button>
+            </>
+          }
+          viewSwitch={
+            <span className="text-xs text-muted-foreground">
+              {t("totalLines", { count: counts.total })} ·{" "}
+              <span className="text-muted-foreground">{t("warnCount", { count: counts.warn })}</span> ·{" "}
+              <span className="text-destructive">{t("errorCount", { count: counts.error })}</span>
+            </span>
+          }
+        />
+      }
+    >
+      <div className="px-4 py-3 md:px-6">
+        <StateBoundary
+          loading={!loaded}
+          error={
+            error
+              ? {
+                  title: tp("errorTitle"),
+                  detail: tp("errorDetail"),
+                  code: errorCodeOf(lastError.current),
+                  codeLabel: tp("errorCodeLabel"),
+                  retryLabel: tp("retry"),
+                }
+              : null
+          }
+          permission={perm.denied ? "logs:read" : null}
+          permissionProps={{
+            title: tp("permissionTitle"),
+            detail: tp("permissionDetail", { name: tn("item.logs"), ask: tp("askAdmin") }),
+            missingLabel: tp("permissionMissing"),
+            askLabel: tp("permissionAsk"),
+            ask: tp("askAdmin"),
           }}
-          className="h-[calc(100vh-14rem)] overflow-auto rounded-lg border bg-card p-2 font-mono text-xs leading-relaxed"
-        >
-          {hasMore && (
-            <div className="flex justify-center py-2">
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-7 text-xs"
-                disabled={loadingHistory}
-                onClick={loadOlderHistory}
-              >
-                {loadingHistory ? t("loading") : t("loadOlder")}
-              </Button>
+          empty={filtered.length === 0}
+          emptyProps={{
+            title: tp("emptyTitle"),
+            reason: tp("empty.logs"),
+          }}
+          skeleton={
+            <div className="space-y-1.5 rounded-lg border bg-card p-3">
+              {Array.from({ length: 12 }).map((_, i) => (
+                <div
+                  // biome-ignore lint/suspicious/noArrayIndexKey: 骨架屏占位，无真实数据标识。
+                  key={i}
+                  className="h-3.5 animate-pulse rounded-sm bg-muted"
+                  style={{ width: `${55 + ((i * 7) % 40)}%` }}
+                />
+              ))}
             </div>
-          )}
-          {filtered.length === 0 ? (
-            <p className="py-10 text-center text-muted-foreground">{t("empty")}</p>
-          ) : (
-            filtered.map((l) => {
+          }
+          onRetry={() => {
+            setError(null);
+            lastError.current = null;
+            perm.reset();
+            void loadOlderHistory();
+          }}
+        >
+          <div
+            onScroll={(e) => {
+              const el = e.currentTarget;
+              stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+            }}
+            className="h-[calc(100vh-16rem)] overflow-auto rounded-lg border bg-card p-2 font-mono text-xs leading-relaxed"
+          >
+            {hasMore && (
+              <div className="flex justify-center py-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs"
+                  disabled={loadingHistory}
+                  onClick={loadOlderHistory}
+                >
+                  {loadingHistory ? t("loading") : t("loadOlder")}
+                </Button>
+              </div>
+            )}
+            {filtered.map((l) => {
               const body =
-                l.tag && l.text.startsWith("[" + l.tag + "]") ? l.text.slice(l.tag.length + 2).trimStart() : l.text;
+                l.tag && l.text.startsWith("[" + l.tag + "]")
+                  ? l.text.slice(l.tag.length + 2).trimStart()
+                  : l.text;
               return (
                 <div key={l.seq} className="flex items-start gap-2 px-1 py-0.5 hover:bg-muted/40">
                   <span className={cn("mt-1.5 size-1.5 shrink-0 rounded-full", levelDot[l.level])} />
                   <span className="shrink-0 tabular-nums text-muted-foreground">{fmtTime(l.ts)}</span>
                   {l.tag && (
-                    <span className="shrink-0 rounded bg-muted px-1 text-[10px] text-foreground/70">{l.tag}</span>
+                    <span className="shrink-0 rounded bg-muted px-1 text-[10px] text-foreground/70">
+                      {l.tag}
+                    </span>
                   )}
-                  <span className={cn("min-w-0 whitespace-pre-wrap break-words", levelTone[l.level])}>{body}</span>
+                  <span className={cn("min-w-0 whitespace-pre-wrap break-words", levelTone[l.level])}>
+                    {body}
+                  </span>
                 </div>
               );
-            })
-          )}
-          <div ref={bottom} />
-        </div>
+            })}
+            <div ref={bottom} />
+          </div>
+        </StateBoundary>
       </div>
-    </div>
+    </PageShell>
   );
 }

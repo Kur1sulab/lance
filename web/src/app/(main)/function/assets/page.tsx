@@ -20,8 +20,11 @@ import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { AssetDslSearch } from "@/components/asset-dsl-search";
+import { StateBoundary } from "@/components/data/state-boundary";
 import { AssetDrawer } from "@/components/domain/asset-drawer";
 import { ScopeTextEditor } from "@/components/scope-text-editor";
+import { PageShell } from "@/components/shell/page-shell";
+import { Toolbar } from "@/components/shell/toolbar";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -61,7 +64,9 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useDetailParam } from "@/hooks/use-detail-param";
+import { usePermissionDenied } from "@/hooks/use-permission-denied";
 import { api } from "@/lib/api";
+import { errorCodeOf } from "@/lib/api-error";
 import { parseCompanyScopeText } from "@/lib/company-scope";
 import type { Asset, Company, CompanyScopeRule } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -112,6 +117,17 @@ const TABS: { key: string; labelKey: string; icon: LucideIcon }[] = [
 
 function AssetsPageInner() {
   const t = useTranslations("assets");
+  // 壳层：面包屑走 nav，四态文案走 pageStates（文案全部来自 messages，不写死）。
+  const tn = useTranslations("nav");
+  const tp = useTranslations("pageStates");
+  const perm = usePermissionDenied();
+  // perm 每次渲染都是新对象；取它内部稳定的 check，避免把它放进 useCallback 依赖后
+  // 让 loadMeta 的标识每渲染都变、进而让下面的 useEffect 反复触发。
+  const checkPermission = perm.check;
+  const lastError = React.useRef<unknown>(null);
+  // 资产列表这一路自己的错误码：用来区分「DSL 语法错(400)」与「真的没取到数」，
+  // 不能被企业/计数那一路的错误码串扰。
+  const assetsErrorCode = React.useRef<string | number | undefined>(undefined);
   // 详情抽屉：?id= 与 URL 双向同步（设计文档 §四）
   const detail = useDetailParam();
   // 点开时先把行对象递给抽屉，省一次 /assets 请求；深链还原时抽屉自己查。
@@ -130,6 +146,9 @@ function AssetsPageInner() {
   const [refreshKey, setRefreshKey] = React.useState(0);
   const assetsRequestRef = React.useRef(0);
   const [rowsTab, setRowsTab] = React.useState("");
+  // 企业/计数这一路没有 loading 标记（原先靠 companies.length === 0 就地提示），
+  // 四态需要一个「这一路已经回来过」的真实信号，否则首屏会把「还没回来」画成「没有企业」。
+  const [metaLoaded, setMetaLoaded] = React.useState(false);
 
   // asset selection & delete
   const [selected, setSelected] = React.useState<Set<number>>(new Set());
@@ -147,16 +166,21 @@ function AssetsPageInner() {
     api
       .companies()
       .then(setCompanies)
-      .catch(() => {
+      .catch((e) => {
         /* Keep the last successful company snapshot on a transient failure. */
-      });
+        lastError.current = e;
+        checkPermission(e);
+      })
+      .finally(() => setMetaLoaded(true));
     api
       .assetCounts()
       .then(setCounts)
-      .catch(() => {
+      .catch((e) => {
         /* Keep the last successful counters on a transient failure. */
+        lastError.current = e;
+        checkPermission(e);
       });
-  }, []);
+  }, [checkPermission]);
 
   // Manual refresh: reload counts/companies and re-fetch the current page.
   const refresh = React.useCallback(() => {
@@ -268,8 +292,12 @@ function AssetsPageInner() {
         setRowsTab(tab);
         setTotal(r.total);
         setDslError("");
+        assetsErrorCode.current = undefined;
       } catch (e) {
         if (assetsRequestRef.current !== request) return;
+        lastError.current = e;
+        checkPermission(e);
+        assetsErrorCode.current = errorCodeOf(e);
         setDslError(String((e as Error)?.message ?? e));
         setRows([]);
         setRowsTab(tab);
@@ -320,6 +348,48 @@ function AssetsPageInner() {
     />
   );
 
+  // ── 四态判定（全部来自页面上已有的取数结果，不新增请求）────────────────
+  // 400 = DSL 语法错：留在搜索框里就地提示（原有行为），不当成整页加载失败。
+  const loadFailed = dslError !== "" && assetsErrorCode.current !== 400;
+  const permissionProps = {
+    title: tp("permissionTitle"),
+    detail: tp("permissionDetail", { name: tn("item.assets"), ask: tp("askAdmin") }),
+    missingLabel: tp("permissionMissing"),
+    askLabel: tp("permissionAsk"),
+    ask: tp("askAdmin"),
+  };
+  const tableSkeleton = (
+    <Card className="overflow-hidden py-0">
+      <div className="space-y-2 p-3">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <div key={i} className="h-9 animate-pulse rounded-md bg-muted" />
+        ))}
+      </div>
+    </Card>
+  );
+  // 数据 tab 的空态 = 取数成功 + 这一 tab 真的 0 条 + 没有在搜。
+  // 搜了却 0 条不是「平台没有资产」，那种情况仍交给表格自己的 emptyData 行。
+  const tableState: Omit<React.ComponentProps<typeof StateBoundary>, "children"> = {
+    // 只在「这个 tab 还没拿到过第一轮数据」时铺骨架；翻页/改搜索条件时保留旧表格，
+    // 加载中的反馈仍由搜索框与刷新按钮上的 spinner 给（避免每敲一个字整块表格闪一下）。
+    loading: loading && !loaded,
+    error: loadFailed
+      ? {
+          title: tp("errorTitle"),
+          detail: tp("errorDetail"),
+          code: assetsErrorCode.current,
+          codeLabel: tp("errorCodeLabel"),
+          retryLabel: tp("retry"),
+        }
+      : null,
+    permission: perm.denied ? "assets:read" : null,
+    permissionProps,
+    empty: !loading && !loadFailed && loaded && total === 0 && !dslMode,
+    emptyProps: { title: tp("emptyTitle"), reason: tp("empty.assets") },
+    skeleton: tableSkeleton,
+    onRetry: refresh,
+  };
+
   // 资产表在子组件里，行上带 data-asset-id，这里统一代理点击：
   // 点复选框/按钮/链接不算「点行」，避免勾选时把抽屉弹开。
   function openAssetFromEvent(event: React.MouseEvent<HTMLDivElement>) {
@@ -335,464 +405,485 @@ function AssetsPageInner() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-6rem)] min-h-0 flex-col gap-4" onClick={openAssetFromEvent}>
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">{t("title")}</h1>
-        </div>
-        <div className="flex items-center gap-3">
-          <span className="text-sm text-muted-foreground">
-            {t.rich("totalAssets", {
-              count: totalAssets,
-              n: (chunks) => <span className="tabular-nums">{chunks}</span>,
-            })}
-          </span>
-          {selected.size > 0 && (
-            <Button variant="destructive" size="sm" onClick={() => openDelete(Array.from(selected) as number[])}>
-              <Trash2Icon className="size-3.5" /> {t("deleteSelected", { count: selected.size })}
+    <>
+      <PageShell
+        title={t("title")}
+        breadcrumb={[{ label: tn("group.target"), href: "/dashboard" }, { label: tn("item.assets") }]}
+        actions={
+          <>
+            <Button variant="outline" size="sm" onClick={refresh} disabled={loading}>
+              <RefreshCwIcon className={cn("size-4", loading && "animate-spin")} /> {t("refresh")}
             </Button>
-          )}
-          <Button variant="outline" size="sm" onClick={refresh} disabled={loading}>
-            <RefreshCwIcon className={cn("size-4", loading && "animate-spin")} /> {t("refresh")}
-          </Button>
-          <CompanyDialog onSaved={refresh} />
-        </div>
-      </div>
+            <CompanyDialog onSaved={refresh} />
+          </>
+        }
+        toolbar={
+          <Toolbar
+            search={tab === "company" ? undefined : searchBox}
+            viewSwitch={
+              <>
+                <span className="text-xs text-muted-foreground">
+                  {t.rich("totalAssets", {
+                    count: totalAssets,
+                    n: (chunks) => <span className="tabular-nums">{chunks}</span>,
+                  })}
+                </span>
+                {selected.size > 0 && (
+                  <Button variant="destructive" size="sm" onClick={() => openDelete(Array.from(selected) as number[])}>
+                    <Trash2Icon className="size-3.5" /> {t("deleteSelected", { count: selected.size })}
+                  </Button>
+                )}
+              </>
+            }
+          />
+        }
+      >
+        <div className="flex h-full min-h-0 flex-col gap-4 px-4 py-3 md:px-6" onClick={openAssetFromEvent}>
+          <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col gap-4">
+            <div className="overflow-x-auto overflow-y-hidden">
+              <TabsList variant="default">
+                {TABS.map((tt) => (
+                  <TabsTrigger key={tt.key} value={tt.key}>
+                    <tt.icon className="size-3.5" />
+                    {t(`tab.${tt.labelKey}`)}
+                    <span className="ml-1 tabular-nums text-muted-foreground">{tabCounts[tt.key]}</span>
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </div>
 
-      <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col gap-4">
-        <div className="overflow-x-auto overflow-y-hidden">
-          <TabsList variant="default">
-            {TABS.map((tt) => (
-              <TabsTrigger key={tt.key} value={tt.key}>
-                <tt.icon className="size-3.5" />
-                {t(`tab.${tt.labelKey}`)}
-                <span className="ml-1 tabular-nums text-muted-foreground">{tabCounts[tt.key]}</span>
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </div>
+            {/* 企业 */}
+            <TabsContent value="company" className="mt-0 flex min-h-0 flex-1 flex-col">
+              <StateBoundary
+                loading={!metaLoaded && !perm.denied}
+                permission={perm.denied ? "assets:read" : null}
+                permissionProps={permissionProps}
+                empty={metaLoaded && companies.length === 0}
+                emptyProps={{ title: tp("emptyTitle"), reason: tp("empty.assets") }}
+                skeleton={tableSkeleton}
+                onRetry={refresh}
+              >
+                <Card className="flex min-h-0 flex-1 flex-col overflow-hidden py-0">
+                  <div className="min-h-0 flex-1 overflow-auto">
+                    <Table>
+                      <TableHeader className="sticky top-0 z-10 bg-card">
+                        <TableRow>
+                          <TableHead>{t("companyTable.name")}</TableHead>
+                          <TableHead className="w-24 text-right">{t("companyTable.count")}</TableHead>
+                          <TableHead>{t("companyTable.scope")}</TableHead>
+                          <TableHead className="w-36 text-right">{t("companyTable.actions")}</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {companies.map((c) => (
+                          <TableRow key={c.id}>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <CompanyAvatar name={c.name} logo={c.logo} />
+                                <span className="font-medium">{c.name}</span>
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums text-sm">{c.asset_count}</TableCell>
+                            <TableCell>
+                              {c.scope?.length ? (
+                                <div className="flex flex-wrap gap-1">
+                                  {c.scope.map((s, i) => (
+                                    <Badge key={i} variant="secondary" className="font-mono text-[11px]">
+                                      {s.raw}
+                                    </Badge>
+                                  ))}
+                                </div>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">{t("noScope")}</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex items-center justify-end gap-1.5">
+                                <EditScopeDialog company={c} onSaved={refresh} />
+                                <AppendScopeDialog company={c} onSaved={refresh} />
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="size-7 text-muted-foreground hover:text-destructive"
+                                  onClick={() => {
+                                    setCompanyDeleteTarget(c);
+                                    setCompanyDeleteAssets(false);
+                                  }}
+                                  aria-label={t("deleteCompanyAria", { name: c.name })}
+                                >
+                                  <Trash2Icon className="size-3.5" />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </Card>
+              </StateBoundary>
+            </TabsContent>
 
-        {/* 企业 */}
-        <TabsContent value="company" className="mt-0 flex min-h-0 flex-1 flex-col">
-          <Card className="flex min-h-0 flex-1 flex-col overflow-hidden py-0">
-            <div className="min-h-0 flex-1 overflow-auto">
-              <Table>
-                <TableHeader className="sticky top-0 z-10 bg-card">
-                  <TableRow>
-                    <TableHead>{t("companyTable.name")}</TableHead>
-                    <TableHead className="w-24 text-right">{t("companyTable.count")}</TableHead>
-                    <TableHead>{t("companyTable.scope")}</TableHead>
-                    <TableHead className="w-36 text-right">{t("companyTable.actions")}</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {companies.map((c) => (
-                    <TableRow key={c.id}>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <CompanyAvatar name={c.name} logo={c.logo} />
-                          <span className="font-medium">{c.name}</span>
-                        </div>
+            {/* 根域名 */}
+            <TabsContent value="root_domain" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
+              <StateBoundary {...tableState}>
+                <AssetCard
+                  cols={["", t("col.domain"), t("col.icp"), t("col.ownerCompany"), ""]}
+                  loaded={loaded}
+                  total={total}
+                  page={page}
+                  size={size}
+                  onSize={setSize}
+                  onPage={setPage}
+                  rows={currentRows}
+                  selected={selected}
+                  onToggleAll={(ids) => toggleSelectAll(ids)}
+                >
+                  {slice(tabData("root_domain")).map((a) => (
+                    <TableRow
+                      key={a.id}
+                      data-asset-id={a.id}
+                      className={cn("cursor-pointer", selected.has(a.id) && "bg-muted/40")}
+                    >
+                      <TableCell className="w-8 pr-0">
+                        <Checkbox checked={selected.has(a.id)} onCheckedChange={() => toggleSelect(a.id)} />
                       </TableCell>
-                      <TableCell className="text-right tabular-nums text-sm">{c.asset_count}</TableCell>
-                      <TableCell>
-                        {c.scope?.length ? (
-                          <div className="flex flex-wrap gap-1">
-                            {c.scope.map((s, i) => (
-                              <Badge key={i} variant="secondary" className="font-mono text-[11px]">
-                                {s.raw}
-                              </Badge>
-                            ))}
-                          </div>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">{t("noScope")}</span>
-                        )}
+                      <TableCell className="font-mono text-xs font-medium">{a.domain}</TableCell>
+                      <TableCell className="text-xs">{a.icp || "—"}</TableCell>
+                      <TableCell className="text-xs">
+                        {companyName(a.company_id) || <span className="text-muted-foreground">{t("unassigned")}</span>}
                       </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <EditScopeDialog company={c} onSaved={refresh} />
-                          <AppendScopeDialog company={c} onSaved={refresh} />
+                      <TableCell className="w-8 pl-0">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-7 text-muted-foreground hover:text-destructive"
+                          onClick={() => openDelete([a.id])}
+                          aria-label={t("deleteAssetAria", { target: a.domain || a.id })}
+                        >
+                          <Trash2Icon className="size-3.5" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </AssetCard>
+              </StateBoundary>
+            </TabsContent>
+
+            {/* IP */}
+            <TabsContent value="ip" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
+              <StateBoundary {...tableState}>
+                <AssetCard
+                  cols={["", "IP", t("col.cSegment"), t("col.boundDomains"), t("col.openPorts"), ""]}
+                  loaded={loaded}
+                  total={total}
+                  page={page}
+                  size={size}
+                  onSize={setSize}
+                  onPage={setPage}
+                  rows={currentRows}
+                  selected={selected}
+                  onToggleAll={(ids) => toggleSelectAll(ids)}
+                >
+                  {slice(tabData("ip")).map((a) => (
+                    <TableRow
+                      key={a.id}
+                      data-asset-id={a.id}
+                      className={cn("cursor-pointer", selected.has(a.id) && "bg-muted/40")}
+                    >
+                      <TableCell className="w-8 pr-0">
+                        <Checkbox checked={selected.has(a.id)} onCheckedChange={() => toggleSelect(a.id)} />
+                      </TableCell>
+                      <TableCell className="font-mono text-xs font-medium">{a.ip}</TableCell>
+                      <TableCell className="font-mono text-xs">{a.c_segment || "—"}</TableCell>
+                      <TableCell>
+                        <Chips items={a.bound_domains ?? []} mono />
+                      </TableCell>
+                      <TableCell>
+                        <Chips
+                          items={(a.open_ports ?? []).map((p) => (p.service ? `${p.port}/${p.service}` : String(p.port)))}
+                          mono
+                        />
+                      </TableCell>
+                      <TableCell className="w-8 pl-0">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-7 text-muted-foreground hover:text-destructive"
+                          onClick={() => openDelete([a.id])}
+                          aria-label={t("deleteAssetAria", { target: a.ip || a.id })}
+                        >
+                          <Trash2Icon className="size-3.5" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </AssetCard>
+              </StateBoundary>
+            </TabsContent>
+
+            {/* 子域名 */}
+            <TabsContent value="subdomain" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
+              <StateBoundary {...tableState}>
+                <AssetCard
+                  cols={["", t("col.domain"), t("col.rootDomain"), t("col.recordType"), t("col.recordValue"), ""]}
+                  loaded={loaded}
+                  total={total}
+                  page={page}
+                  size={size}
+                  onSize={setSize}
+                  onPage={setPage}
+                  rows={currentRows}
+                  selected={selected}
+                  onToggleAll={(ids) => toggleSelectAll(ids)}
+                >
+                  {slice(tabData("subdomain")).map((a) => (
+                    <TableRow
+                      key={a.id}
+                      data-asset-id={a.id}
+                      className={cn("cursor-pointer", selected.has(a.id) && "bg-muted/40")}
+                    >
+                      <TableCell className="w-8 pr-0">
+                        <Checkbox checked={selected.has(a.id)} onCheckedChange={() => toggleSelect(a.id)} />
+                      </TableCell>
+                      <TableCell className="font-mono text-xs font-medium">{a.domain}</TableCell>
+                      <TableCell className="font-mono text-xs">{a.root_domain || "—"}</TableCell>
+                      <TableCell className="text-xs">{a.record_type || "—"}</TableCell>
+                      <TableCell className="max-w-xs truncate font-mono text-xs">
+                        {(Array.isArray(a.record_value) ? a.record_value.join(", ") : a.record_value) || "—"}
+                      </TableCell>
+                      <TableCell className="w-8 pl-0">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-7 text-muted-foreground hover:text-destructive"
+                          onClick={() => openDelete([a.id])}
+                          aria-label={t("deleteAssetAria", { target: a.domain || a.id })}
+                        >
+                          <Trash2Icon className="size-3.5" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </AssetCard>
+              </StateBoundary>
+            </TabsContent>
+
+            {/* 应用 */}
+            <TabsContent value="app" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
+              <StateBoundary {...tableState}>
+                <AssetCard
+                  cols={["", t("col.appName"), "Bundle ID", t("col.category"), t("col.icp"), ""]}
+                  loaded={loaded}
+                  total={total}
+                  page={page}
+                  size={size}
+                  onSize={setSize}
+                  onPage={setPage}
+                  rows={currentRows}
+                  selected={selected}
+                  onToggleAll={(ids) => toggleSelectAll(ids)}
+                >
+                  {slice(tabData("app")).map((a) => (
+                    <TableRow
+                      key={a.id}
+                      data-asset-id={a.id}
+                      className={cn("cursor-pointer", selected.has(a.id) && "bg-muted/40")}
+                    >
+                      <TableCell className="w-8 pr-0">
+                        <Checkbox checked={selected.has(a.id)} onCheckedChange={() => toggleSelect(a.id)} />
+                      </TableCell>
+                      <TableCell className="text-xs font-medium">{a.app_name || "—"}</TableCell>
+                      <TableCell className="font-mono text-xs">{a.bundle_id || "—"}</TableCell>
+                      <TableCell className="text-xs">{a.category || "—"}</TableCell>
+                      <TableCell className="text-xs">{a.app_icp || "—"}</TableCell>
+                      <TableCell className="w-8 pl-0">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-7 text-muted-foreground hover:text-destructive"
+                          onClick={() => openDelete([a.id])}
+                          aria-label={t("deleteAssetAria", { target: a.app_name || a.id })}
+                        >
+                          <Trash2Icon className="size-3.5" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </AssetCard>
+              </StateBoundary>
+            </TabsContent>
+
+            {/* 服务 */}
+            <TabsContent value="service" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
+              <StateBoundary {...tableState}>
+                <AssetCard
+                  cols={[
+                    "",
+                    t("col.service"),
+                    t("col.domain"),
+                    "IP",
+                    t("col.port"),
+                    t("col.statusCode"),
+                    t("col.pageTitle"),
+                    t("col.fingerprint"),
+                    t("col.auth"),
+                    "",
+                  ]}
+                  loaded={loaded}
+                  total={total}
+                  page={page}
+                  size={size}
+                  onSize={setSize}
+                  onPage={setPage}
+                  rows={currentRows}
+                  selected={selected}
+                  onToggleAll={(ids) => toggleSelectAll(ids)}
+                >
+                  {slice(tabData("service")).map((a) => {
+                    const isHttp = a.service_type === "http";
+                    const svc = a.service_name || (isHttp ? "http" : "") || a.service_type || "";
+                    let domainCell: React.ReactNode = "—";
+                    if (isHttp && a.url) {
+                      domainCell = (
+                        <a
+                          href={a.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-blue-600 hover:underline dark:text-blue-400"
+                        >
+                          {a.domain || a.url}
+                        </a>
+                      );
+                    } else if (a.domain) {
+                      domainCell = a.domain;
+                    }
+                    return (
+                      <TableRow
+                      key={a.id}
+                      data-asset-id={a.id}
+                      className={cn("cursor-pointer", selected.has(a.id) && "bg-muted/40")}
+                    >
+                        <TableCell className="w-8 pr-0">
+                          <Checkbox checked={selected.has(a.id)} onCheckedChange={() => toggleSelect(a.id)} />
+                        </TableCell>
+                        <TableCell className="text-xs">
+                          <Badge variant={isHttp ? "default" : "secondary"} className="font-mono text-[10px]">
+                            {svc || "—"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="max-w-[14rem] truncate font-mono text-xs" title={a.domain || a.url}>
+                          {domainCell}
+                        </TableCell>
+                        <TableCell className="font-mono text-xs">{a.ip || "—"}</TableCell>
+                        <TableCell className="font-mono text-xs tabular-nums">{a.port || "—"}</TableCell>
+                        <TableCell>
+                          {a.status_code != null ? (
+                            <span className={cn("font-mono text-xs font-semibold tabular-nums", statusTone(a.status_code))}>
+                              {a.status_code}
+                            </span>
+                          ) : (
+                            "—"
+                          )}
+                        </TableCell>
+                        <TableCell className="max-w-[12rem] truncate text-xs" title={a.page_title}>
+                          {a.page_title || "—"}
+                        </TableCell>
+                        <TableCell>
+                          <Chips items={a.technologies ?? []} />
+                        </TableCell>
+                        <TableCell>
+                          {(a.auth ?? []).length === 0 ? (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          ) : (
+                            (a.auth ?? []).map((authItem, i) => {
+                              const item = authItem as Record<string, string>;
+                              const label = item.type || item.username || t("authFallback");
+                              return (
+                                <span key={i} className="inline-flex items-center gap-1 text-[11px]">
+                                  <KeyRoundIcon className="size-3 text-muted-foreground" />
+                                  <span className="font-mono">{label}</span>
+                                </span>
+                              );
+                            })
+                          )}
+                        </TableCell>
+                        <TableCell className="w-8 pl-0">
                           <Button
                             variant="ghost"
                             size="icon"
                             className="size-7 text-muted-foreground hover:text-destructive"
-                            onClick={() => {
-                              setCompanyDeleteTarget(c);
-                              setCompanyDeleteAssets(false);
-                            }}
-                            aria-label={t("deleteCompanyAria", { name: c.name })}
+                            onClick={() => openDelete([a.id])}
+                            aria-label={t("deleteAssetAria", { target: a.url || a.id })}
                           >
                             <Trash2Icon className="size-3.5" />
                           </Button>
-                        </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </AssetCard>
+              </StateBoundary>
+            </TabsContent>
+
+            {/* 端点 */}
+            <TabsContent value="endpoint" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
+              <StateBoundary {...tableState}>
+                <AssetCard
+                  cols={["", t("col.method"), t("col.fullUrl"), t("col.params"), ""]}
+                  loaded={loaded}
+                  total={total}
+                  page={page}
+                  size={size}
+                  onSize={setSize}
+                  onPage={setPage}
+                  rows={currentRows}
+                  selected={selected}
+                  onToggleAll={(ids) => toggleSelectAll(ids)}
+                >
+                  {slice(tabData("endpoint")).map((a) => (
+                    <TableRow
+                      key={a.id}
+                      data-asset-id={a.id}
+                      className={cn("cursor-pointer", selected.has(a.id) && "bg-muted/40")}
+                    >
+                      <TableCell className="w-8 pr-0">
+                        <Checkbox checked={selected.has(a.id)} onCheckedChange={() => toggleSelect(a.id)} />
+                      </TableCell>
+                      <TableCell className="w-16">
+                        <MethodBadge method={a.method || ""} />
+                      </TableCell>
+                      <TableCell className="max-w-sm truncate font-mono text-xs" title={a.url}>
+                        {a.url || "—"}
+                      </TableCell>
+                      <TableCell>
+                        <Chips
+                          items={(a.params ?? []).map((p) => {
+                            const item = p as Record<string, string>;
+                            return item.name ? `${item.name}(${item.location || "?"})` : "?";
+                          })}
+                          mono
+                        />
+                      </TableCell>
+                      <TableCell className="w-8 pl-0">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-7 text-muted-foreground hover:text-destructive"
+                          onClick={() => openDelete([a.id])}
+                          aria-label={t("deleteAssetAria", { target: a.url || a.id })}
+                        >
+                          <Trash2Icon className="size-3.5" />
+                        </Button>
                       </TableCell>
                     </TableRow>
                   ))}
-                  {companies.length === 0 && (
-                    <TableRow>
-                      <TableCell colSpan={4} className="py-10 text-center text-sm text-muted-foreground">
-                        {t("companyEmpty")}
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-          </Card>
-        </TabsContent>
-
-        {/* 根域名 */}
-        <TabsContent value="root_domain" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
-          {searchBox}
-          <AssetCard
-            cols={["", t("col.domain"), t("col.icp"), t("col.ownerCompany"), ""]}
-            loaded={loaded}
-            total={total}
-            page={page}
-            size={size}
-            onSize={setSize}
-            onPage={setPage}
-            rows={currentRows}
-            selected={selected}
-            onToggleAll={(ids) => toggleSelectAll(ids)}
-          >
-            {slice(tabData("root_domain")).map((a) => (
-              <TableRow
-                key={a.id}
-                data-asset-id={a.id}
-                className={cn("cursor-pointer", selected.has(a.id) && "bg-muted/40")}
-              >
-                <TableCell className="w-8 pr-0">
-                  <Checkbox checked={selected.has(a.id)} onCheckedChange={() => toggleSelect(a.id)} />
-                </TableCell>
-                <TableCell className="font-mono text-xs font-medium">{a.domain}</TableCell>
-                <TableCell className="text-xs">{a.icp || "—"}</TableCell>
-                <TableCell className="text-xs">
-                  {companyName(a.company_id) || <span className="text-muted-foreground">{t("unassigned")}</span>}
-                </TableCell>
-                <TableCell className="w-8 pl-0">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="size-7 text-muted-foreground hover:text-destructive"
-                    onClick={() => openDelete([a.id])}
-                    aria-label={t("deleteAssetAria", { target: a.domain || a.id })}
-                  >
-                    <Trash2Icon className="size-3.5" />
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
-          </AssetCard>
-        </TabsContent>
-
-        {/* IP */}
-        <TabsContent value="ip" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
-          {searchBox}
-          <AssetCard
-            cols={["", "IP", t("col.cSegment"), t("col.boundDomains"), t("col.openPorts"), ""]}
-            loaded={loaded}
-            total={total}
-            page={page}
-            size={size}
-            onSize={setSize}
-            onPage={setPage}
-            rows={currentRows}
-            selected={selected}
-            onToggleAll={(ids) => toggleSelectAll(ids)}
-          >
-            {slice(tabData("ip")).map((a) => (
-              <TableRow
-                key={a.id}
-                data-asset-id={a.id}
-                className={cn("cursor-pointer", selected.has(a.id) && "bg-muted/40")}
-              >
-                <TableCell className="w-8 pr-0">
-                  <Checkbox checked={selected.has(a.id)} onCheckedChange={() => toggleSelect(a.id)} />
-                </TableCell>
-                <TableCell className="font-mono text-xs font-medium">{a.ip}</TableCell>
-                <TableCell className="font-mono text-xs">{a.c_segment || "—"}</TableCell>
-                <TableCell>
-                  <Chips items={a.bound_domains ?? []} mono />
-                </TableCell>
-                <TableCell>
-                  <Chips
-                    items={(a.open_ports ?? []).map((p) => (p.service ? `${p.port}/${p.service}` : String(p.port)))}
-                    mono
-                  />
-                </TableCell>
-                <TableCell className="w-8 pl-0">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="size-7 text-muted-foreground hover:text-destructive"
-                    onClick={() => openDelete([a.id])}
-                    aria-label={t("deleteAssetAria", { target: a.ip || a.id })}
-                  >
-                    <Trash2Icon className="size-3.5" />
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
-          </AssetCard>
-        </TabsContent>
-
-        {/* 子域名 */}
-        <TabsContent value="subdomain" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
-          {searchBox}
-          <AssetCard
-            cols={["", t("col.domain"), t("col.rootDomain"), t("col.recordType"), t("col.recordValue"), ""]}
-            loaded={loaded}
-            total={total}
-            page={page}
-            size={size}
-            onSize={setSize}
-            onPage={setPage}
-            rows={currentRows}
-            selected={selected}
-            onToggleAll={(ids) => toggleSelectAll(ids)}
-          >
-            {slice(tabData("subdomain")).map((a) => (
-              <TableRow
-                key={a.id}
-                data-asset-id={a.id}
-                className={cn("cursor-pointer", selected.has(a.id) && "bg-muted/40")}
-              >
-                <TableCell className="w-8 pr-0">
-                  <Checkbox checked={selected.has(a.id)} onCheckedChange={() => toggleSelect(a.id)} />
-                </TableCell>
-                <TableCell className="font-mono text-xs font-medium">{a.domain}</TableCell>
-                <TableCell className="font-mono text-xs">{a.root_domain || "—"}</TableCell>
-                <TableCell className="text-xs">{a.record_type || "—"}</TableCell>
-                <TableCell className="max-w-xs truncate font-mono text-xs">
-                  {(Array.isArray(a.record_value) ? a.record_value.join(", ") : a.record_value) || "—"}
-                </TableCell>
-                <TableCell className="w-8 pl-0">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="size-7 text-muted-foreground hover:text-destructive"
-                    onClick={() => openDelete([a.id])}
-                    aria-label={t("deleteAssetAria", { target: a.domain || a.id })}
-                  >
-                    <Trash2Icon className="size-3.5" />
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
-          </AssetCard>
-        </TabsContent>
-
-        {/* 应用 */}
-        <TabsContent value="app" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
-          {searchBox}
-          <AssetCard
-            cols={["", t("col.appName"), "Bundle ID", t("col.category"), t("col.icp"), ""]}
-            loaded={loaded}
-            total={total}
-            page={page}
-            size={size}
-            onSize={setSize}
-            onPage={setPage}
-            rows={currentRows}
-            selected={selected}
-            onToggleAll={(ids) => toggleSelectAll(ids)}
-          >
-            {slice(tabData("app")).map((a) => (
-              <TableRow
-                key={a.id}
-                data-asset-id={a.id}
-                className={cn("cursor-pointer", selected.has(a.id) && "bg-muted/40")}
-              >
-                <TableCell className="w-8 pr-0">
-                  <Checkbox checked={selected.has(a.id)} onCheckedChange={() => toggleSelect(a.id)} />
-                </TableCell>
-                <TableCell className="text-xs font-medium">{a.app_name || "—"}</TableCell>
-                <TableCell className="font-mono text-xs">{a.bundle_id || "—"}</TableCell>
-                <TableCell className="text-xs">{a.category || "—"}</TableCell>
-                <TableCell className="text-xs">{a.app_icp || "—"}</TableCell>
-                <TableCell className="w-8 pl-0">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="size-7 text-muted-foreground hover:text-destructive"
-                    onClick={() => openDelete([a.id])}
-                    aria-label={t("deleteAssetAria", { target: a.app_name || a.id })}
-                  >
-                    <Trash2Icon className="size-3.5" />
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
-          </AssetCard>
-        </TabsContent>
-
-        {/* 服务 */}
-        <TabsContent value="service" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
-          {searchBox}
-          <AssetCard
-            cols={[
-              "",
-              t("col.service"),
-              t("col.domain"),
-              "IP",
-              t("col.port"),
-              t("col.statusCode"),
-              t("col.pageTitle"),
-              t("col.fingerprint"),
-              t("col.auth"),
-              "",
-            ]}
-            loaded={loaded}
-            total={total}
-            page={page}
-            size={size}
-            onSize={setSize}
-            onPage={setPage}
-            rows={currentRows}
-            selected={selected}
-            onToggleAll={(ids) => toggleSelectAll(ids)}
-          >
-            {slice(tabData("service")).map((a) => {
-              const isHttp = a.service_type === "http";
-              const svc = a.service_name || (isHttp ? "http" : "") || a.service_type || "";
-              let domainCell: React.ReactNode = "—";
-              if (isHttp && a.url) {
-                domainCell = (
-                  <a
-                    href={a.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-blue-600 hover:underline dark:text-blue-400"
-                  >
-                    {a.domain || a.url}
-                  </a>
-                );
-              } else if (a.domain) {
-                domainCell = a.domain;
-              }
-              return (
-                <TableRow
-                key={a.id}
-                data-asset-id={a.id}
-                className={cn("cursor-pointer", selected.has(a.id) && "bg-muted/40")}
-              >
-                  <TableCell className="w-8 pr-0">
-                    <Checkbox checked={selected.has(a.id)} onCheckedChange={() => toggleSelect(a.id)} />
-                  </TableCell>
-                  <TableCell className="text-xs">
-                    <Badge variant={isHttp ? "default" : "secondary"} className="font-mono text-[10px]">
-                      {svc || "—"}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="max-w-[14rem] truncate font-mono text-xs" title={a.domain || a.url}>
-                    {domainCell}
-                  </TableCell>
-                  <TableCell className="font-mono text-xs">{a.ip || "—"}</TableCell>
-                  <TableCell className="font-mono text-xs tabular-nums">{a.port || "—"}</TableCell>
-                  <TableCell>
-                    {a.status_code != null ? (
-                      <span className={cn("font-mono text-xs font-semibold tabular-nums", statusTone(a.status_code))}>
-                        {a.status_code}
-                      </span>
-                    ) : (
-                      "—"
-                    )}
-                  </TableCell>
-                  <TableCell className="max-w-[12rem] truncate text-xs" title={a.page_title}>
-                    {a.page_title || "—"}
-                  </TableCell>
-                  <TableCell>
-                    <Chips items={a.technologies ?? []} />
-                  </TableCell>
-                  <TableCell>
-                    {(a.auth ?? []).length === 0 ? (
-                      <span className="text-xs text-muted-foreground">—</span>
-                    ) : (
-                      (a.auth ?? []).map((authItem, i) => {
-                        const item = authItem as Record<string, string>;
-                        const label = item.type || item.username || t("authFallback");
-                        return (
-                          <span key={i} className="inline-flex items-center gap-1 text-[11px]">
-                            <KeyRoundIcon className="size-3 text-muted-foreground" />
-                            <span className="font-mono">{label}</span>
-                          </span>
-                        );
-                      })
-                    )}
-                  </TableCell>
-                  <TableCell className="w-8 pl-0">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-7 text-muted-foreground hover:text-destructive"
-                      onClick={() => openDelete([a.id])}
-                      aria-label={t("deleteAssetAria", { target: a.url || a.id })}
-                    >
-                      <Trash2Icon className="size-3.5" />
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-          </AssetCard>
-        </TabsContent>
-
-        {/* 端点 */}
-        <TabsContent value="endpoint" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
-          {searchBox}
-          <AssetCard
-            cols={["", t("col.method"), t("col.fullUrl"), t("col.params"), ""]}
-            loaded={loaded}
-            total={total}
-            page={page}
-            size={size}
-            onSize={setSize}
-            onPage={setPage}
-            rows={currentRows}
-            selected={selected}
-            onToggleAll={(ids) => toggleSelectAll(ids)}
-          >
-            {slice(tabData("endpoint")).map((a) => (
-              <TableRow
-                key={a.id}
-                data-asset-id={a.id}
-                className={cn("cursor-pointer", selected.has(a.id) && "bg-muted/40")}
-              >
-                <TableCell className="w-8 pr-0">
-                  <Checkbox checked={selected.has(a.id)} onCheckedChange={() => toggleSelect(a.id)} />
-                </TableCell>
-                <TableCell className="w-16">
-                  <MethodBadge method={a.method || ""} />
-                </TableCell>
-                <TableCell className="max-w-sm truncate font-mono text-xs" title={a.url}>
-                  {a.url || "—"}
-                </TableCell>
-                <TableCell>
-                  <Chips
-                    items={(a.params ?? []).map((p) => {
-                      const item = p as Record<string, string>;
-                      return item.name ? `${item.name}(${item.location || "?"})` : "?";
-                    })}
-                    mono
-                  />
-                </TableCell>
-                <TableCell className="w-8 pl-0">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="size-7 text-muted-foreground hover:text-destructive"
-                    onClick={() => openDelete([a.id])}
-                    aria-label={t("deleteAssetAria", { target: a.url || a.id })}
-                  >
-                    <Trash2Icon className="size-3.5" />
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
-          </AssetCard>
-        </TabsContent>
-      </Tabs>
+                </AssetCard>
+              </StateBoundary>
+            </TabsContent>
+          </Tabs>
+        </div>
+      </PageShell>
 
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent>
@@ -882,7 +973,7 @@ function AssetsPageInner() {
         }}
         asset={detailAsset && String(detailAsset.id) === detail.id ? detailAsset : null}
       />
-    </div>
+    </>
   );
 }
 

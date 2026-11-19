@@ -24,7 +24,9 @@ import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { ApprovalExecutionFocus, useApprovalFocus, useApprovalHistory } from "@/components/approval-execution-focus";
+import { StateBoundary } from "@/components/data/state-boundary";
 import { MentionTextarea } from "@/components/mention-textarea";
+import { PageShell } from "@/components/shell/page-shell";
 import { SideQuestionButton, SideQuestionWorkspace } from "@/components/side-question-workspace";
 import { TodoPopover } from "@/components/todo-popover";
 import { Transcript } from "@/components/transcript";
@@ -53,11 +55,13 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
+import { usePermissionDenied } from "@/hooks/use-permission-denied";
 import { useSideQuestions } from "@/hooks/use-side-questions";
 import { getDateLocale } from "@/i18n/datetime";
 import { mergeActivities } from "@/lib/activity-merge";
 import { useAgentLabels } from "@/lib/agent-i18n";
 import { api } from "@/lib/api";
+import { errorCodeOf } from "@/lib/api-error";
 import { shouldSubmitOnKey, useChatSendMode } from "@/lib/chat-send-mode";
 import { getLocalStorageValue, setLocalStorageValue } from "@/lib/local-storage.client";
 import { isBtwCommand } from "@/lib/side-questions";
@@ -139,8 +143,8 @@ function groupByAgent(conversations: Conversation[], nameOf: (agentKey: string) 
 function LiveBadge() {
   const t = useTranslations("chat");
   return (
-    <span className="inline-flex items-center gap-1 rounded bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-medium text-blue-600 dark:text-blue-400">
-      <span className="size-1 animate-pulse rounded-full bg-blue-500" />
+    <span className="inline-flex items-center gap-1 rounded bg-primary/15 px-1.5 py-0.5 font-medium text-[10px] text-primary">
+      <span className="size-1 animate-pulse rounded-full bg-primary" />
       {t("live")}
     </span>
   );
@@ -1093,6 +1097,13 @@ function AgentGroupHeader({
 
 export default function ChatPage() {
   const t = useTranslations("chat");
+  const tn = useTranslations("nav");
+  const tp = useTranslations("pageStates");
+  const perm = usePermissionDenied();
+  const permCheck = perm.check;
+  const lastError = React.useRef<unknown>(null);
+  // 首帧取数失败要用 state 触发重渲染（ref 不会），错误码仍从 lastError 取。
+  const [listFailed, setListFailed] = React.useState(false);
   const [agents, setAgents] = React.useState<Agent[]>([]);
   const [profiles, setProfiles] = React.useState<LLMProfile[]>([]);
   const [convs, setConvs] = React.useState<Conversation[]>([]);
@@ -1141,11 +1152,15 @@ export default function ChatPage() {
       if (seq === conversationListSeq.current) {
         setConvs(items);
         setConvsLoaded(true);
+        setListFailed(false);
       }
-    } catch {
+    } catch (e) {
       // Preserve the selected transcript and list on a transient poll failure.
+      lastError.current = e;
+      permCheck(e);
+      setListFailed(true);
     }
-  }, []);
+  }, [permCheck]);
   React.useEffect(() => {
     api
       .agents()
@@ -1410,227 +1425,268 @@ export default function ChatPage() {
   );
   const cancelRename = React.useCallback(() => setRenamingId(null), []);
 
+  // 四态：首帧未到才给骨架；只有首帧失败才整页报错——轮询抖动仍保留当前对话。
+  const firstLoadFailed = !convsLoaded && listFailed && !perm.denied;
+
   return (
-    <div
-      data-content-padding="false"
-      className="flex h-[calc(100svh-3rem)] min-w-0 flex-col overflow-hidden p-3 sm:p-4 md:h-[calc(100svh-4rem)] md:p-6"
+    <PageShell
+      title={tn("item.chat")}
+      breadcrumb={[{ label: tn("group.war"), href: "/dashboard" }, { label: tn("item.chat") }]}
+      contentClassName="overflow-hidden"
     >
-      <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 grid-rows-[minmax(10rem,15rem)_minmax(0,1fr)] gap-3 md:grid-cols-[18rem_minmax(0,1fr)] md:grid-rows-[minmax(0,1fr)] md:gap-4">
-        {/* left: conversation list */}
-        <div className="bg-card flex flex-col overflow-hidden rounded-lg border">
-          <div className="flex flex-col gap-2 border-b p-2">
-            <Button size="sm" className="w-full" onClick={() => selectConversation(null)}>
-              <PlusIcon /> {t("newConversation")}
-            </Button>
-            <Select
-              value={agentFilter === null ? "all" : `agent:${agentFilter}`}
-              onValueChange={(value) => changeAgentFilter(value === "all" ? null : value.slice(6))}
-              disabled={bulkDeleting}
-            >
-              <SelectTrigger size="sm" className="w-full min-w-0" aria-label={t("filterByAgentAria")}>
-                <Bot />
-                <SelectValue placeholder={t("allAgents")} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  <SelectItem value="all">{t("allAgents")}</SelectItem>
-                  {agentFilterOptions.map((agent) => (
-                    <SelectItem key={agent.key} value={`agent:${agent.key}`}>
-                      {t("agentOption", { name: agent.name, count: agent.count })}
-                    </SelectItem>
+      <StateBoundary
+        className="h-full"
+        loading={!convsLoaded && !listFailed}
+        error={
+          firstLoadFailed
+            ? {
+                title: tp("errorTitle"),
+                detail: tp("errorDetail"),
+                code: errorCodeOf(lastError.current),
+                codeLabel: tp("errorCodeLabel"),
+                retryLabel: tp("retry"),
+              }
+            : null
+        }
+        permission={perm.denied ? "chat:read" : null}
+        permissionProps={{
+          title: tp("permissionTitle"),
+          detail: tp("permissionDetail", { name: tn("item.chat"), ask: tp("askAdmin") }),
+          missingLabel: tp("permissionMissing"),
+          askLabel: tp("permissionAsk"),
+          ask: tp("askAdmin"),
+        }}
+        onRetry={() => void reloadConvs()}
+        skeleton={
+          <div className="grid h-full grid-cols-1 gap-3 md:grid-cols-[18rem_minmax(0,1fr)] md:gap-4">
+            <div className="animate-pulse rounded-lg border bg-muted/40" />
+            <div className="animate-pulse rounded-lg border bg-muted/40" />
+          </div>
+        }
+      >
+        <div className="flex h-full min-w-0 flex-col overflow-hidden">
+          <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 grid-rows-[minmax(10rem,15rem)_minmax(0,1fr)] gap-3 md:grid-cols-[18rem_minmax(0,1fr)] md:grid-rows-[minmax(0,1fr)] md:gap-4">
+            {/* left: conversation list */}
+            <div className="bg-card flex flex-col overflow-hidden rounded-lg border">
+              <div className="flex flex-col gap-2 border-b p-2">
+                <Button size="sm" className="w-full" onClick={() => selectConversation(null)}>
+                  <PlusIcon /> {t("newConversation")}
+                </Button>
+                <Select
+                  value={agentFilter === null ? "all" : `agent:${agentFilter}`}
+                  onValueChange={(value) => changeAgentFilter(value === "all" ? null : value.slice(6))}
+                  disabled={bulkDeleting}
+                >
+                  <SelectTrigger size="sm" className="w-full min-w-0" aria-label={t("filterByAgentAria")}>
+                    <Bot />
+                    <SelectValue placeholder={t("allAgents")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectItem value="all">{t("allAgents")}</SelectItem>
+                      {agentFilterOptions.map((agent) => (
+                        <SelectItem key={agent.key} value={`agent:${agent.key}`}>
+                          {t("agentOption", { name: agent.name, count: agent.count })}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+                {convs.length > 0 &&
+                  (selectionMode ? (
+                    <div className="flex items-center gap-2 px-1">
+                      <Checkbox
+                        checked={conversationHeaderChecked}
+                        onCheckedChange={(checked) => toggleAllConversations(checked === true)}
+                        aria-label={t("selectAllAria")}
+                        disabled={filteredConversations.length === 0 || bulkDeleting}
+                      />
+                      <span className="text-muted-foreground min-w-0 flex-1 text-xs tabular-nums">
+                        {selectedConversationCount > 0
+                          ? t("selectedCount", { count: selectedConversationCount })
+                          : conversationCountLabel}
+                      </span>
+                      {selectedConversationCount > 0 && (
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          disabled={bulkDeleting}
+                          onClick={() => setBulkDeleteOpen(true)}
+                        >
+                          <Trash2Icon data-icon="inline-start" />
+                          {t("item.delete")}
+                        </Button>
+                      )}
+                      <Button size="sm" variant="ghost" onClick={exitSelectionMode}>
+                        {t("done")}
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 px-1">
+                      <span className="text-muted-foreground min-w-0 flex-1 text-xs tabular-nums">
+                        {conversationCountLabel}
+                      </span>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-muted-foreground"
+                        onClick={() => setSelectionMode(true)}
+                        disabled={filteredConversations.length === 0}
+                      >
+                        <ListChecksIcon data-icon="inline-start" />
+                        {t("multiSelect")}
+                      </Button>
+                    </div>
                   ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-            {convs.length > 0 &&
-              (selectionMode ? (
-                <div className="flex items-center gap-2 px-1">
-                  <Checkbox
-                    checked={conversationHeaderChecked}
-                    onCheckedChange={(checked) => toggleAllConversations(checked === true)}
-                    aria-label={t("selectAllAria")}
-                    disabled={filteredConversations.length === 0 || bulkDeleting}
-                  />
-                  <span className="text-muted-foreground min-w-0 flex-1 text-xs tabular-nums">
-                    {selectedConversationCount > 0
-                      ? t("selectedCount", { count: selectedConversationCount })
-                      : conversationCountLabel}
-                  </span>
-                  {selectedConversationCount > 0 && (
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      disabled={bulkDeleting}
-                      onClick={() => setBulkDeleteOpen(true)}
-                    >
-                      <Trash2Icon data-icon="inline-start" />
-                      {t("item.delete")}
-                    </Button>
-                  )}
-                  <Button size="sm" variant="ghost" onClick={exitSelectionMode}>
-                    {t("done")}
-                  </Button>
+              </div>
+              <StateBoundary
+                className="flex min-h-0 flex-1 flex-col justify-center"
+                empty={convsLoaded && filteredConversations.length === 0}
+                emptyProps={{
+                  title: tp("emptyTitle"),
+                  reason: agentFilter === null ? tp("empty.chat") : t("emptyForAgent"),
+                }}
+              >
+                <ScrollArea
+                  key={agentFilter === null ? "all" : `agent:${agentFilter}`}
+                  type="auto"
+                  className="min-h-0 min-w-0 flex-1 [&_[data-slot=scroll-area-viewport]>div]:block!"
+                >
+                  <div className="flex min-w-0 flex-col gap-0.5 p-2">
+                    {pinnedConversations.map((c) => (
+                      <ConversationItem
+                        key={c.id}
+                        conv={c}
+                        agent={agentByKey.get(c.agent_key)}
+                        active={selectedId === c.id}
+                        renaming={renamingId === c.id}
+                        renameText={renamingId === c.id ? renameText : ""}
+                        onSelect={selectConversation}
+                        onStartRename={startRename}
+                        onRenameText={setRenameText}
+                        onCommitRename={commitRename}
+                        onCancelRename={cancelRename}
+                        onTogglePinned={togglePinned}
+                        onDelete={del}
+                        selectionMode={selectionMode}
+                        selectedForDelete={selectedConversationIds.has(c.id)}
+                        onSelectedForDeleteChange={toggleConversationSelected}
+                      />
+                    ))}
+                    {agentGroups.map((group) => {
+                      const collapsed = collapsedAgents.has(group.key);
+                      return (
+                        <React.Fragment key={group.key}>
+                          <AgentGroupHeader
+                            group={group}
+                            collapsed={collapsed}
+                            hasActive={group.conversations.some((c) => c.id === selectedId)}
+                            onToggle={toggleAgentCollapsed}
+                          />
+                          {!collapsed &&
+                            group.conversations.map((c) => (
+                              <ConversationItem
+                                key={c.id}
+                                conv={c}
+                                agent={agentByKey.get(c.agent_key)}
+                                showAgent={false}
+                                active={selectedId === c.id}
+                                renaming={renamingId === c.id}
+                                renameText={renamingId === c.id ? renameText : ""}
+                                onSelect={selectConversation}
+                                onStartRename={startRename}
+                                onRenameText={setRenameText}
+                                onCommitRename={commitRename}
+                                onCancelRename={cancelRename}
+                                onTogglePinned={togglePinned}
+                                onDelete={del}
+                                selectionMode={selectionMode}
+                                selectedForDelete={selectedConversationIds.has(c.id)}
+                                onSelectedForDeleteChange={toggleConversationSelected}
+                              />
+                            ))}
+                        </React.Fragment>
+                      );
+                    })}
+                    {visibleConversationCount < filteredConversations.length && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="mt-1 w-full"
+                        onClick={() => setVisibleConversationCount((count) => count + CONVERSATION_LIST_PAGE)}
+                      >
+                        {t("loadMore")}
+                      </Button>
+                    )}
+                  </div>
+                </ScrollArea>
+              </StateBoundary>
+            </div>
+
+            {/* right: chat view */}
+            <div className="bg-card flex min-w-0 flex-col overflow-hidden rounded-lg border">
+              {selected ? (
+                <ChatView
+                  key={selected.id}
+                  conv={selected}
+                  agents={agents}
+                  profiles={profiles}
+                  initial={pendingByConv[selected.id]}
+                  onTitleMaybeChanged={reloadConvs}
+                  onConvUpdated={reloadConvs}
+                />
+              ) : sourceRequested ? (
+                <div role="status" className="p-6 text-sm text-muted-foreground">
+                  {convsLoaded ? t("deletedConversation") : t("loadingConversation")}
                 </div>
               ) : (
-                <div className="flex items-center gap-2 px-1">
-                  <span className="text-muted-foreground min-w-0 flex-1 text-xs tabular-nums">
-                    {conversationCountLabel}
-                  </span>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="text-muted-foreground"
-                    onClick={() => setSelectionMode(true)}
-                    disabled={filteredConversations.length === 0}
-                  >
-                    <ListChecksIcon data-icon="inline-start" />
-                    {t("multiSelect")}
-                  </Button>
-                </div>
-              ))}
-          </div>
-          <ScrollArea
-            key={agentFilter === null ? "all" : `agent:${agentFilter}`}
-            type="auto"
-            className="min-h-0 min-w-0 flex-1 [&_[data-slot=scroll-area-viewport]>div]:block!"
-          >
-            <div className="flex min-w-0 flex-col gap-0.5 p-2">
-              {filteredConversations.length === 0 && (
-                <p className="text-muted-foreground px-2 py-6 text-center text-xs">
-                  {agentFilter === null ? t("emptyAll") : t("emptyForAgent")}
-                </p>
-              )}
-              {pinnedConversations.map((c) => (
-                <ConversationItem
-                  key={c.id}
-                  conv={c}
-                  agent={agentByKey.get(c.agent_key)}
-                  active={selectedId === c.id}
-                  renaming={renamingId === c.id}
-                  renameText={renamingId === c.id ? renameText : ""}
-                  onSelect={selectConversation}
-                  onStartRename={startRename}
-                  onRenameText={setRenameText}
-                  onCommitRename={commitRename}
-                  onCancelRename={cancelRename}
-                  onTogglePinned={togglePinned}
-                  onDelete={del}
-                  selectionMode={selectionMode}
-                  selectedForDelete={selectedConversationIds.has(c.id)}
-                  onSelectedForDeleteChange={toggleConversationSelected}
+                <DraftChat
+                  agents={chatAgents}
+                  profiles={profiles}
+                  onStarted={(c, pending) => {
+                    if (agentFilter !== null && agentFilter !== c.agent_key) changeAgentFilter(null);
+                    // Insert the new conversation immediately so `selected` resolves to
+                    // it on this render (switching to ChatView right away, before the
+                    // async reloadConvs lands); reloadConvs then reconciles titles etc.
+                    if (pending) setPendingByConv((p) => ({ ...p, [c.id]: pending }));
+                    setConvs((prev) => {
+                      if (prev.some((item) => item.id === c.id)) return prev;
+                      const firstUnpinned = prev.findIndex((item) => !conversationIsPinned(item));
+                      const insertAt = firstUnpinned < 0 ? prev.length : firstUnpinned;
+                      return [...prev.slice(0, insertAt), c, ...prev.slice(insertAt)];
+                    });
+                    setSelectedId(c.id);
+                    void reloadConvs();
+                  }}
                 />
-              ))}
-              {agentGroups.map((group) => {
-                const collapsed = collapsedAgents.has(group.key);
-                return (
-                  <React.Fragment key={group.key}>
-                    <AgentGroupHeader
-                      group={group}
-                      collapsed={collapsed}
-                      hasActive={group.conversations.some((c) => c.id === selectedId)}
-                      onToggle={toggleAgentCollapsed}
-                    />
-                    {!collapsed &&
-                      group.conversations.map((c) => (
-                        <ConversationItem
-                          key={c.id}
-                          conv={c}
-                          agent={agentByKey.get(c.agent_key)}
-                          showAgent={false}
-                          active={selectedId === c.id}
-                          renaming={renamingId === c.id}
-                          renameText={renamingId === c.id ? renameText : ""}
-                          onSelect={selectConversation}
-                          onStartRename={startRename}
-                          onRenameText={setRenameText}
-                          onCommitRename={commitRename}
-                          onCancelRename={cancelRename}
-                          onTogglePinned={togglePinned}
-                          onDelete={del}
-                          selectionMode={selectionMode}
-                          selectedForDelete={selectedConversationIds.has(c.id)}
-                          onSelectedForDeleteChange={toggleConversationSelected}
-                        />
-                      ))}
-                  </React.Fragment>
-                );
-              })}
-              {visibleConversationCount < filteredConversations.length && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="mt-1 w-full"
-                  onClick={() => setVisibleConversationCount((count) => count + CONVERSATION_LIST_PAGE)}
-                >
-                  {t("loadMore")}
-                </Button>
               )}
             </div>
-          </ScrollArea>
+          </div>
+          <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>{t("bulkDeleteTitle", { count: selectedConversationCount })}</AlertDialogTitle>
+                <AlertDialogDescription>{t("bulkDeleteDesc")}</AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel disabled={bulkDeleting}>{t("item.cancel")}</AlertDialogCancel>
+                <AlertDialogAction
+                  variant="destructive"
+                  disabled={bulkDeleting || selectedConversationCount === 0}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    void deleteSelectedConversations();
+                  }}
+                >
+                  {bulkDeleting && <Loader2Icon data-icon="inline-start" className="animate-spin" />}
+                  {bulkDeleting ? t("deleting") : t("confirmDelete")}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
-
-        {/* right: chat view */}
-        <div className="bg-card flex min-w-0 flex-col overflow-hidden rounded-lg border">
-          {selected ? (
-            <ChatView
-              key={selected.id}
-              conv={selected}
-              agents={agents}
-              profiles={profiles}
-              initial={pendingByConv[selected.id]}
-              onTitleMaybeChanged={reloadConvs}
-              onConvUpdated={reloadConvs}
-            />
-          ) : sourceRequested ? (
-            <div role="status" className="p-6 text-sm text-muted-foreground">
-              {convsLoaded ? t("deletedConversation") : t("loadingConversation")}
-            </div>
-          ) : (
-            <DraftChat
-              agents={chatAgents}
-              profiles={profiles}
-              onStarted={(c, pending) => {
-                if (agentFilter !== null && agentFilter !== c.agent_key) changeAgentFilter(null);
-                // Insert the new conversation immediately so `selected` resolves to
-                // it on this render (switching to ChatView right away, before the
-                // async reloadConvs lands); reloadConvs then reconciles titles etc.
-                if (pending) setPendingByConv((p) => ({ ...p, [c.id]: pending }));
-                setConvs((prev) => {
-                  if (prev.some((item) => item.id === c.id)) return prev;
-                  const firstUnpinned = prev.findIndex((item) => !conversationIsPinned(item));
-                  const insertAt = firstUnpinned < 0 ? prev.length : firstUnpinned;
-                  return [...prev.slice(0, insertAt), c, ...prev.slice(insertAt)];
-                });
-                setSelectedId(c.id);
-                void reloadConvs();
-              }}
-            />
-          )}
-        </div>
-      </div>
-      <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("bulkDeleteTitle", { count: selectedConversationCount })}</AlertDialogTitle>
-            <AlertDialogDescription>{t("bulkDeleteDesc")}</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={bulkDeleting}>{t("item.cancel")}</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              disabled={bulkDeleting || selectedConversationCount === 0}
-              onClick={(event) => {
-                event.preventDefault();
-                void deleteSelectedConversations();
-              }}
-            >
-              {bulkDeleting && <Loader2Icon data-icon="inline-start" className="animate-spin" />}
-              {bulkDeleting ? t("deleting") : t("confirmDelete")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </div>
+      </StateBoundary>
+    </PageShell>
   );
 }

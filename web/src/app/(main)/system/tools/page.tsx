@@ -6,6 +6,9 @@ import { PlayIcon, PlusIcon, RotateCcwIcon, SaveIcon, SearchIcon, Trash2Icon } f
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
+import { StateBoundary } from "@/components/data/state-boundary";
+import { PageShell } from "@/components/shell/page-shell";
+import { Toolbar } from "@/components/shell/toolbar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,8 +21,10 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { usePermissionDenied } from "@/hooks/use-permission-denied";
 import { useAgentLabels } from "@/lib/agent-i18n";
 import { api } from "@/lib/api";
+import { errorCodeOf } from "@/lib/api-error";
 import { useBuiltinLabels } from "@/lib/builtin-i18n";
 import type { Agent, Tool } from "@/lib/types";
 
@@ -189,7 +194,7 @@ function ToolEditor({
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4">
         {trafficGated && (
-          <div className="border-amber-500/40 bg-amber-500/10 text-muted-foreground rounded-md border px-3 py-2 text-xs">
+          <div className="text-muted-foreground rounded-md border border-border bg-muted/40 px-3 py-2 text-xs">
             {t.rich("trafficGatedNote", { b: (c) => <b>{c}</b> })}
           </div>
         )}
@@ -349,19 +354,38 @@ function ToolGridCard({ tool, onClick }: { tool: Tool; onClick: () => void }) {
 
 export default function ToolsPage() {
   const t = useTranslations("toolsPage");
+  const tn = useTranslations("nav");
+  const tp = useTranslations("pageStates");
+  const perm = usePermissionDenied();
+  // perm 每次渲染都是新对象；只取稳定的 check/reset 引用，避免放进 deps 触发重复取数。
+  const checkPerm = perm.check;
+  const resetPerm = perm.reset;
+  const lastError = React.useRef<unknown>(null);
   const builtinLabels = useBuiltinLabels();
   const [tools, setTools] = React.useState<Tool[]>([]);
   const [agents, setAgents] = React.useState<Agent[]>([]);
   const [captureOn, setCaptureOn] = React.useState(false);
   const [selectedKey, setSelectedKey] = React.useState<string | null>(null);
   const [customEdit, setCustomEdit] = React.useState<Tool | "new" | null>(null);
+  const [loaded, setLoaded] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const loading = !loaded;
 
   const reload = React.useCallback(() => {
     api
       .tools()
-      .then(setTools)
-      .catch(() => setTools([]));
-  }, []);
+      .then((r) => {
+        setTools(r);
+        setError(null);
+      })
+      .catch((e) => {
+        lastError.current = e;
+        checkPerm(e);
+        setError(e instanceof Error ? e.message : "load failed");
+        setTools([]);
+      })
+      .finally(() => setLoaded(true));
+  }, [checkPerm]);
   React.useEffect(() => {
     reload();
     api
@@ -402,88 +426,132 @@ export default function ToolsPage() {
   const openTool = (tool: Tool) => (tool.system ? setSelectedKey(tool.key) : setCustomEdit(tool));
 
   return (
-    <div className="flex flex-1 flex-col gap-4 md:gap-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">{t("title")}</h1>
-          <p className="text-muted-foreground text-sm">{t("subtitle")}</p>
-        </div>
-        <div className="relative w-64">
-          <SearchIcon className="text-muted-foreground absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2" />
-          <Input
-            className="h-8 pl-8 text-sm"
-            placeholder={t("searchPlaceholder")}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        </div>
-      </div>
+    <PageShell
+      title={t("title")}
+      description={t("subtitle")}
+      breadcrumb={[{ label: tn("group.capability"), href: "/dashboard" }, { label: tn("item.tools") }]}
+      actions={
+        <Button size="sm" onClick={() => setCustomEdit("new")}>
+          <PlusIcon /> {t("newCustom")}
+        </Button>
+      }
+      toolbar={
+        <Toolbar
+          search={
+            <div className="relative">
+              <SearchIcon className="text-muted-foreground absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2" />
+              <Input
+                className="h-8 pl-8 text-sm"
+                placeholder={t("searchPlaceholder")}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </div>
+          }
+        />
+      }
+      contentClassName="px-4 py-3 md:px-6"
+    >
+      <StateBoundary
+        loading={loading}
+        error={
+          error
+            ? {
+                title: tp("errorTitle"),
+                detail: tp("errorDetail"),
+                code: errorCodeOf(lastError.current),
+                codeLabel: tp("errorCodeLabel"),
+                retryLabel: tp("retry"),
+              }
+            : null
+        }
+        permission={perm.denied ? "tools:read" : null}
+        permissionProps={{
+          title: tp("permissionTitle"),
+          detail: tp("permissionDetail", { name: tn("item.tools"), ask: tp("askAdmin") }),
+          missingLabel: tp("permissionMissing"),
+          askLabel: tp("permissionAsk"),
+          ask: tp("askAdmin"),
+        }}
+        empty={!loading && !error && tools.length === 0}
+        emptyProps={{
+          title: tp("emptyTitle"),
+          reason: tp("empty.tools"),
+          nextStep: { label: t("newCustom"), onClick: () => setCustomEdit("new") },
+        }}
+        skeleton={
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {Array.from({ length: 9 }).map((_, i) => (
+              <div key={i} className="h-28 animate-pulse rounded-lg bg-muted" />
+            ))}
+          </div>
+        }
+        onRetry={() => {
+          setError(null);
+          lastError.current = null;
+          resetPerm();
+          reload();
+        }}
+      >
+        <Tabs defaultValue="system">
+          <TabsList>
+            <TabsTrigger value="system">{t("tabSystem")}</TabsTrigger>
+            <TabsTrigger value="custom">{t("tabCustom")}</TabsTrigger>
+          </TabsList>
 
-      <Tabs defaultValue="system">
-        <TabsList>
-          <TabsTrigger value="system">{t("tabSystem")}</TabsTrigger>
-          <TabsTrigger value="custom">{t("tabCustom")}</TabsTrigger>
-        </TabsList>
+          <TabsContent value="system">
+            <Card>
+              <CardHeader>
+                <CardTitle>{t("tabSystem")}</CardTitle>
+                <CardDescription>
+                  {query.trim()
+                    ? t("systemMatched", { shown: systemTools.length, total: allSystemCount })
+                    : t("systemTotal", { total: allSystemCount })}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {systemTools.length === 0 ? (
+                  <p className="text-muted-foreground py-6 text-center text-sm">
+                    {query.trim() ? t("systemNoMatch") : t("systemEmpty")}
+                  </p>
+                ) : (
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {systemTools.map((tool) => (
+                      <ToolGridCard key={tool.key} tool={tool} onClick={() => openTool(tool)} />
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
 
-        <TabsContent value="system">
-          <Card>
-            <CardHeader>
-              <CardTitle>{t("tabSystem")}</CardTitle>
-              <CardDescription>
-                {query.trim()
-                  ? t("systemMatched", { shown: systemTools.length, total: allSystemCount })
-                  : t("systemTotal", { total: allSystemCount })}
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {systemTools.length === 0 ? (
-                <p className="text-muted-foreground py-6 text-center text-sm">
-                  {query.trim() ? t("systemNoMatch") : t("systemEmpty")}
-                </p>
-              ) : (
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {systemTools.map((tool) => (
-                    <ToolGridCard key={tool.key} tool={tool} onClick={() => openTool(tool)} />
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="custom">
-          <Card>
-            <CardHeader>
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <CardTitle>{t("tabCustom")}</CardTitle>
-                  <CardDescription>
-                    {query.trim()
-                      ? t("customMatched", { shown: customTools.length, total: allCustomCount })
-                      : t("customTotal", { total: allCustomCount })}
-                  </CardDescription>
-                </div>
-                <Button size="sm" onClick={() => setCustomEdit("new")}>
-                  <PlusIcon /> {t("newCustom")}
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {customTools.length === 0 ? (
-                <p className="text-muted-foreground py-6 text-center text-sm">
-                  {query.trim() ? t("customNoMatch") : t("customEmpty")}
-                </p>
-              ) : (
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {customTools.map((tool) => (
-                    <ToolGridCard key={tool.key} tool={tool} onClick={() => openTool(tool)} />
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+          <TabsContent value="custom">
+            <Card>
+              <CardHeader>
+                <CardTitle>{t("tabCustom")}</CardTitle>
+                <CardDescription>
+                  {query.trim()
+                    ? t("customMatched", { shown: customTools.length, total: allCustomCount })
+                    : t("customTotal", { total: allCustomCount })}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {customTools.length === 0 ? (
+                  <p className="text-muted-foreground py-6 text-center text-sm">
+                    {query.trim() ? t("customNoMatch") : t("customEmpty")}
+                  </p>
+                ) : (
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {customTools.map((tool) => (
+                      <ToolGridCard key={tool.key} tool={tool} onClick={() => openTool(tool)} />
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
+      </StateBoundary>
 
       <Sheet open={!!selected} onOpenChange={(o) => !o && setSelectedKey(null)}>
         <SheetContent side="right" className="gap-0 p-0 data-[side=right]:w-[30vw] data-[side=right]:sm:max-w-[30vw]">
@@ -515,7 +583,7 @@ export default function ToolsPage() {
           reload();
         }}
       />
-    </div>
+    </PageShell>
   );
 }
 

@@ -16,6 +16,8 @@ import {
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
+import { StateBoundary } from "@/components/data/state-boundary";
+import { PageShell } from "@/components/shell/page-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -27,7 +29,9 @@ import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { usePermissionDenied } from "@/hooks/use-permission-denied";
 import { api } from "@/lib/api";
+import { errorCodeOf } from "@/lib/api-error";
 import type { LLMPoolMember, LLMPoolStatus, LLMProfile, LLMRetryOverride } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -182,7 +186,7 @@ function PoolSheet({
                         </span>
                         <span className="font-medium">{m.name}</span>
                         {m.active && (
-                          <Badge variant="outline" className="border-amber-400/50 text-amber-700 dark:text-amber-500">
+                          <Badge variant="outline" className="border-foreground/30 text-foreground">
                             {t("pool.badge.active")}
                           </Badge>
                         )}
@@ -435,7 +439,7 @@ function ProfileSheet({
           <SheetTitle className="flex items-center gap-2">
             {isNew ? t("profile.titleNew") : t("profile.titleEdit", { name: profile?.name ?? "" })}
             {profile?.is_default && (
-              <Badge variant="outline" className="border-amber-400/50 text-amber-700 dark:text-amber-500">
+              <Badge variant="outline" className="border-foreground/30 text-foreground">
                 {t("profile.activeBadge")}
               </Badge>
             )}
@@ -724,7 +728,17 @@ function ProfileSheet({
 
 export default function LLMPage() {
   const t = useTranslations("llmPage");
+  const tn = useTranslations("nav");
+  const tp = useTranslations("pageStates");
+  const perm = usePermissionDenied();
+  // perm 每次渲染都是新对象；只取稳定的 check/reset 引用，避免放进 deps 触发重复取数。
+  const checkPerm = perm.check;
+  const resetPerm = perm.reset;
+  const lastError = React.useRef<unknown>(null);
   const [profiles, setProfiles] = React.useState<LLMProfile[]>([]);
+  const [loaded, setLoaded] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const loading = !loaded;
   const [pool, setPool] = React.useState<LLMPoolStatus | null>(null);
   const [poolOpen, setPoolOpen] = React.useState(false);
   // 抽屉的开关和内容分开存：关闭时 editing 保持不变，否则关闭动画期间标题会从
@@ -759,11 +773,11 @@ export default function LLMPage() {
       if (m?.state === "degraded") {
         return {
           label: t("health.degraded", { fails: m.fails }),
-          cls: "border-amber-500/50 text-amber-600 dark:text-amber-400",
+          cls: "border-border text-foreground",
           hint: m.last_error,
         };
       }
-      return { label: t("health.ok"), cls: "border-emerald-500/50 text-emerald-600 dark:text-emerald-400" };
+      return { label: t("health.ok"), cls: "border-border text-muted-foreground" };
     },
     [t],
   );
@@ -779,11 +793,16 @@ export default function LLMPage() {
   const load = React.useCallback(async () => {
     try {
       setProfiles(await api.llmProfiles());
-    } catch {
-      /* ignore */
+      setError(null);
+    } catch (e) {
+      lastError.current = e;
+      checkPerm(e);
+      setError(e instanceof Error ? e.message : "load failed");
+    } finally {
+      setLoaded(true);
     }
     await loadPool();
-  }, [loadPool]);
+  }, [loadPool, checkPerm]);
 
   React.useEffect(() => {
     void load();
@@ -823,17 +842,16 @@ export default function LLMPage() {
   const poolOn = pool?.enabled ?? false;
 
   return (
-    <div className="flex flex-1 flex-col gap-4 md:gap-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="font-semibold text-xl tracking-tight">LLM</h1>
-          <p className="text-muted-foreground text-sm">{t("page.subtitle")}</p>
-        </div>
-        <div className="flex items-center gap-2">
+    <PageShell
+      title={tn("item.llm")}
+      description={t("page.subtitle")}
+      breadcrumb={[{ label: tn("group.capability"), href: "/dashboard" }, { label: tn("item.llm") }]}
+      actions={
+        <>
           <Button size="sm" variant="outline" onClick={() => setPoolOpen(true)}>
             <ZapIcon /> {t("page.poolConfig")}
             {poolOn && (
-              <Badge variant="outline" className="ml-1 border-emerald-500/50 text-emerald-600 dark:text-emerald-400">
+              <Badge variant="outline" className="ml-1 border-border text-muted-foreground">
                 {t("page.enabled")}
               </Badge>
             )}
@@ -841,126 +859,167 @@ export default function LLMPage() {
           <Button size="sm" variant="outline" onClick={() => openEditor(null)}>
             <PlusIcon /> {t("page.new")}
           </Button>
-        </div>
-      </div>
-
-      <Tabs defaultValue="profiles" className="flex-1">
-        <TabsList>
-          <TabsTrigger value="profiles">{t("page.tab.profiles")}</TabsTrigger>
-          <TabsTrigger value="retry">{t("page.tab.retry")}</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="profiles" className="mt-4">
+        </>
+      }
+      contentClassName="px-4 py-3 md:px-6"
+    >
+      <StateBoundary
+        loading={loading}
+        error={
+          error
+            ? {
+                title: tp("errorTitle"),
+                detail: tp("errorDetail"),
+                code: errorCodeOf(lastError.current),
+                codeLabel: tp("errorCodeLabel"),
+                retryLabel: tp("retry"),
+              }
+            : null
+        }
+        permission={perm.denied ? "llm:read" : null}
+        permissionProps={{
+          title: tp("permissionTitle"),
+          detail: tp("permissionDetail", { name: tn("item.llm"), ask: tp("askAdmin") }),
+          missingLabel: tp("permissionMissing"),
+          askLabel: tp("permissionAsk"),
+          ask: tp("askAdmin"),
+        }}
+        skeleton={
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {profiles.map((p) => {
-              const h = healthOf(p, health.get(p.id));
-              return (
-                // biome-ignore lint/a11y/useSemanticElements: 卡片内含自己的操作按钮，用原生 <button> 会造成按钮嵌套（非法 HTML）
-                <Card
-                  key={p.id}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => openEditor(p)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      openEditor(p);
-                    }
-                  }}
-                  className={cn(
-                    "cursor-pointer gap-0 py-4 outline-none transition-colors hover:border-foreground/30",
-                    p.is_default && "border-amber-400/50 bg-amber-400/5",
-                  )}
-                >
-                  <CardContent className="grid gap-2 px-4">
-                    <div className="flex items-start gap-2">
-                      <StarIcon
-                        className={cn(
-                          "mt-0.5 size-4 shrink-0",
-                          p.is_default ? "fill-amber-400 text-amber-700 dark:text-amber-400" : "text-muted-foreground",
-                        )}
-                      />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="truncate font-medium text-sm">{p.name}</span>
-                          <Badge variant="outline" className="uppercase">
-                            {p.format}
-                          </Badge>
-                          <Badge variant="outline" className={cn("ml-auto", h.cls)} title={h.hint}>
-                            {h.label}
-                          </Badge>
-                        </div>
-                        <code className="mt-1 block truncate font-mono text-muted-foreground text-xs">{p.model}</code>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap gap-x-3 gap-y-0.5 pl-6 text-muted-foreground text-xs">
-                      {p.api_key_hint && <span>{p.api_key_hint}</span>}
-                      <span>
-                        {p.rate_per_second}/s · {p.rate_per_minute}/min
-                      </span>
-                      {p.proxy && <span className="truncate">{t("card.proxy", { proxy: p.proxy })}</span>}
-                      {p.reasoning_effort && (
-                        <span>
-                          {t("card.thinking", {
-                            effort: p.reasoning_effort === "off" ? t("card.thinkingOff") : p.reasoning_effort,
-                          })}
-                        </span>
-                      )}
-                      {/* 轮询相关的两个字段只在轮询开着时才有意义，关着时不占版面 */}
-                      {poolOn &&
-                        !p.is_default &&
-                        (p.pool_exclude ? (
-                          <span>{t("card.excluded")}</span>
-                        ) : (
-                          <span>{t("card.priority", { priority: p.priority ?? 0 })}</span>
-                        ))}
-                    </div>
-
-                    <div className="mt-1 flex gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="flex-1"
-                        disabled={p.is_default}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void activate(p.id, p.name);
-                        }}
-                      >
-                        {p.is_default ? t("card.active") : t("card.activate")}
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="outline"
-                        aria-label={t("card.deleteAria")}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void remove(p);
-                        }}
-                      >
-                        <Trash2Icon className="text-destructive" />
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
-            {profiles.length === 0 && (
-              <div className="col-span-full rounded-lg border border-dashed p-10 text-center text-muted-foreground text-sm">
-                {t("page.empty")}
-              </div>
-            )}
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="h-36 animate-pulse rounded-xl bg-muted" />
+            ))}
           </div>
-        </TabsContent>
+        }
+        onRetry={() => {
+          setError(null);
+          lastError.current = null;
+          resetPerm();
+          void load();
+        }}
+      >
+        <Tabs defaultValue="profiles" className="flex-1">
+          <TabsList>
+            <TabsTrigger value="profiles">{t("page.tab.profiles")}</TabsTrigger>
+            <TabsTrigger value="retry">{t("page.tab.retry")}</TabsTrigger>
+          </TabsList>
 
-        <TabsContent value="retry" className="mt-4">
-          <RetryPolicyPanel />
-        </TabsContent>
-      </Tabs>
+          <TabsContent value="profiles" className="mt-4">
+            <StateBoundary
+              empty={profiles.length === 0}
+              emptyProps={{
+                title: tp("emptyTitle"),
+                reason: tp("empty.llm"),
+                nextStep: { label: t("page.new"), onClick: () => openEditor(null) },
+              }}
+            >
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {profiles.map((p) => {
+                  const h = healthOf(p, health.get(p.id));
+                  return (
+                    // biome-ignore lint/a11y/useSemanticElements: 卡片内含自己的操作按钮，用原生 <button> 会造成按钮嵌套（非法 HTML）
+                    <Card
+                      key={p.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => openEditor(p)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          openEditor(p);
+                        }
+                      }}
+                      className={cn(
+                        "cursor-pointer gap-0 py-4 outline-none transition-colors hover:border-foreground/30",
+                        p.is_default && "border-foreground/30 bg-muted/50",
+                      )}
+                    >
+                      <CardContent className="grid gap-2 px-4">
+                        <div className="flex items-start gap-2">
+                          <StarIcon
+                            className={cn(
+                              "mt-0.5 size-4 shrink-0",
+                              p.is_default ? "fill-foreground text-foreground" : "text-muted-foreground",
+                            )}
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="truncate font-medium text-sm">{p.name}</span>
+                              <Badge variant="outline" className="uppercase">
+                                {p.format}
+                              </Badge>
+                              <Badge variant="outline" className={cn("ml-auto", h.cls)} title={h.hint}>
+                                {h.label}
+                              </Badge>
+                            </div>
+                            <code className="mt-1 block truncate font-mono text-muted-foreground text-xs">{p.model}</code>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-x-3 gap-y-0.5 pl-6 text-muted-foreground text-xs">
+                          {p.api_key_hint && <span>{p.api_key_hint}</span>}
+                          <span>
+                            {p.rate_per_second}/s · {p.rate_per_minute}/min
+                          </span>
+                          {p.proxy && <span className="truncate">{t("card.proxy", { proxy: p.proxy })}</span>}
+                          {p.reasoning_effort && (
+                            <span>
+                              {t("card.thinking", {
+                                effort: p.reasoning_effort === "off" ? t("card.thinkingOff") : p.reasoning_effort,
+                              })}
+                            </span>
+                          )}
+                          {/* 轮询相关的两个字段只在轮询开着时才有意义，关着时不占版面 */}
+                          {poolOn &&
+                            !p.is_default &&
+                            (p.pool_exclude ? (
+                              <span>{t("card.excluded")}</span>
+                            ) : (
+                              <span>{t("card.priority", { priority: p.priority ?? 0 })}</span>
+                            ))}
+                        </div>
+
+                        <div className="mt-1 flex gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="flex-1"
+                            disabled={p.is_default}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void activate(p.id, p.name);
+                            }}
+                          >
+                            {p.is_default ? t("card.active") : t("card.activate")}
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="outline"
+                            aria-label={t("card.deleteAria")}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void remove(p);
+                            }}
+                          >
+                            <Trash2Icon className="text-destructive" />
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+            </StateBoundary>
+          </TabsContent>
+
+          <TabsContent value="retry" className="mt-4">
+            <RetryPolicyPanel />
+          </TabsContent>
+        </Tabs>
+      </StateBoundary>
 
       <ProfileSheet profile={editing} open={editOpen} onOpenChange={setEditOpen} onSaved={() => void load()} />
       <PoolSheet open={poolOpen} onOpenChange={setPoolOpen} pool={pool} onReload={loadPool} />
-    </div>
+    </PageShell>
   );
 }
