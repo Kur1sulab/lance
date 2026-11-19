@@ -110,6 +110,8 @@ interface FindingsTableProps {
   onDelete: (finding: Finding) => void;
   /** 全选框的无障碍标签,平铺视图与分组视图措辞不同。 */
   selectAllLabel?: string;
+  /** 点击行打开右侧详情抽屉(批③)。给了它就不再用行点击切行内展开,行内展开改由最左侧箭头按钮负责。 */
+  onOpenDetail?: (findingID: string) => void;
 }
 
 // FindingsTable 是发现列表的表格主体,平铺视图与按任务分组视图共用同一份行渲染
@@ -132,6 +134,7 @@ export function FindingsTable({
   onDeepen,
   onDelete,
   selectAllLabel,
+  onOpenDetail,
 }: FindingsTableProps) {
   const t = useTranslations("findings");
   const builtinLabels = useBuiltinLabels();
@@ -179,12 +182,16 @@ export function FindingsTable({
                 className="cursor-pointer"
                 role="button"
                 tabIndex={0}
-                aria-expanded={open}
-                onClick={() => onToggleRow(f)}
+                aria-expanded={onOpenDetail ? undefined : open}
+                onClick={() => {
+                  if (onOpenDetail && f.finding_id) onOpenDetail(f.finding_id);
+                  else onToggleRow(f);
+                }}
                 onKeyDown={(event) => {
                   if (event.target !== event.currentTarget || (event.key !== "Enter" && event.key !== " ")) return;
                   event.preventDefault();
-                  onToggleRow(f);
+                  if (onOpenDetail && f.finding_id) onOpenDetail(f.finding_id);
+                  else onToggleRow(f);
                 }}
               >
                 <TableCell onClick={(e) => e.stopPropagation()}>
@@ -196,10 +203,16 @@ export function FindingsTable({
                     />
                   )}
                 </TableCell>
-                <TableCell>
-                  <ChevronRightIcon
-                    className={cn("size-4 text-muted-foreground transition-transform", open && "rotate-90")}
-                  />
+                <TableCell onClick={(e) => e.stopPropagation()}>
+                  <button
+                    type="button"
+                    aria-label={t("table.toggleInline")}
+                    aria-expanded={open}
+                    className="rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    onClick={() => onToggleRow(f)}
+                  >
+                    <ChevronRightIcon className={cn("size-4 transition-transform", open && "rotate-90")} />
+                  </button>
                 </TableCell>
                 <TableCell>
                   <StatusBadge domain="severity" value={f.severity} dot />
@@ -207,14 +220,28 @@ export function FindingsTable({
                 <TableCell className="max-w-md">
                   <div className="flex min-w-0 flex-col gap-0.5">
                     {f.finding_id ? (
-                      <Link
-                        href={`/function/findings/detail?id=${f.finding_id}`}
-                        onClick={(e) => e.stopPropagation()}
-                        className="truncate font-medium hover:text-primary hover:underline"
-                        title={t("table.viewDetail")}
-                      >
-                        {f.name || f.vulnclass || t("table.unclassified")}
-                      </Link>
+                      onOpenDetail ? (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onOpenDetail(f.finding_id as string);
+                          }}
+                          className="truncate text-left font-medium hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          title={t("table.viewDetail")}
+                        >
+                          {f.name || f.vulnclass || t("table.unclassified")}
+                        </button>
+                      ) : (
+                        <Link
+                          href={`/function/findings/detail?id=${f.finding_id}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="truncate font-medium hover:text-primary hover:underline"
+                          title={t("table.viewDetail")}
+                        >
+                          {f.name || f.vulnclass || t("table.unclassified")}
+                        </Link>
+                      )
                     ) : (
                       <span className="truncate font-medium">{f.name || f.vulnclass || t("table.unclassified")}</span>
                     )}

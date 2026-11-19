@@ -18,6 +18,7 @@ import {
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
+import { FindingDrawer } from "@/components/domain/finding-drawer";
 import { FindingRetestDialog } from "@/components/finding-retest-dialog";
 import { StatusBadge } from "@/components/status-badge";
 import { TablePagination } from "@/components/table-pagination";
@@ -39,6 +40,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { useDetailParam } from "@/hooks/use-detail-param";
 import { api } from "@/lib/api";
 import { getLocalStorageValue, setLocalStorageValue } from "@/lib/local-storage.client";
 import type {
@@ -128,8 +130,10 @@ const EMPTY_STATS: FindingStats = {
   tasks: [],
 };
 
-export default function FindingsPage() {
+function FindingsPageInner() {
   const t = useTranslations("findings");
+  // 详情抽屉：?id= 与 URL 双向同步（设计文档 §四）
+  const detail = useDetailParam();
   const tStatus = useTranslations("status");
   const [view, setView] = React.useState<FindingView>("flat");
   const [severity, setSeverity] = React.useState<"all" | Severity>("all");
@@ -786,6 +790,7 @@ export default function FindingsPage() {
     activeRetests,
     onDeepen: openDeepen,
     onDelete: deleteFinding,
+    onOpenDetail: detail.openDetail,
   };
 
   // 平铺视图与资产视图右侧是同一张表 + 同一份分页,只是筛选条件不同。
@@ -1266,6 +1271,17 @@ export default function FindingsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {/* 右侧详情抽屉：URL 带 ?id= 就打开，刷新还原、链接可分享、后退即关 */}
+      <FindingDrawer id={detail.id} open={detail.open} onClose={detail.closeDetail} onChanged={() => void loadFlat()} />
     </div>
+  );
+}
+
+// useSearchParams 必须落在 Suspense 边界内（静态导出要求）。
+export default function FindingsPage() {
+  return (
+    <React.Suspense fallback={null}>
+      <FindingsPageInner />
+    </React.Suspense>
   );
 }

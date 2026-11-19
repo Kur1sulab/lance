@@ -567,12 +567,15 @@ function ApprovalTable({
   decide,
   revision,
   label,
+  onOpenDetail,
 }: {
   rows: InterceptApprovalRow[];
   busy: boolean;
   decide: Decide;
   revision: number;
   label: string;
+  /** 给了就把「点行」交给右侧抽屉，行内展开由最左侧箭头按钮负责（批③）。 */
+  onOpenDetail?: (id: number) => void;
 }) {
   const t = useTranslations("approval");
   const agentNameOf = useAgentNameByKey();
@@ -613,7 +616,7 @@ function ApprovalTable({
               <TableRow
                 data-state={open ? "selected" : undefined}
                 className="cursor-pointer"
-                onClick={() => toggle(row.id)}
+                onClick={() => (onOpenDetail ? onOpenDetail(row.id) : toggle(row.id))}
               >
                 <TableCell>
                   <Button
@@ -677,7 +680,14 @@ function ApprovalTable({
   );
 }
 
-export function ApprovalRecords({ taskId }: { taskId?: string }) {
+export function ApprovalRecords({
+  taskId,
+  onOpenDetail,
+}: {
+  taskId?: string;
+  /** 点击审批行打开右侧抽屉；不传则保持原有的行内展开。 */
+  onOpenDetail?: (id: number) => void;
+}) {
   const t = useTranslations("approval");
   const [rows, setRows] = React.useState<InterceptApprovalRow[]>([]);
   const [pendingRows, setPendingRows] = React.useState<InterceptPending[]>([]);
@@ -902,6 +912,7 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
             decide={decide}
             revision={revision}
             label={t("pendingTableLabel")}
+            onOpenDetail={onOpenDetail}
           />
         </section>
       ) : null}
@@ -934,6 +945,7 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
             decide={decide}
             revision={revision}
             label={t("historyTableLabel")}
+            onOpenDetail={onOpenDetail}
           />
         ) : null}
         {!loading && !error ? (

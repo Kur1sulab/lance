@@ -48,6 +48,7 @@ import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { AssetInterceptRulesEditor } from "@/components/asset-intercept-rules-editor";
+import { TaskDrawer } from "@/components/domain/task-drawer";
 import { StatusBadge } from "@/components/status-badge";
 import { TablePagination } from "@/components/table-pagination";
 import { TaskLLMProfileChain } from "@/components/task-llm-profile-chain";
@@ -121,6 +122,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useDetailParam } from "@/hooks/use-detail-param";
 import { ApiError, api } from "@/lib/api";
 import { getLocalStorageValue, setLocalStorageValue } from "@/lib/local-storage.client";
 import { type SortDirection, useStoredSortPreference } from "@/lib/sort-preference";
@@ -305,8 +307,10 @@ function compareTasks(left: Task, right: Task, field: TaskSortField, direction: 
   return -compareTaskIDs(left.id, right.id);
 }
 
-export default function TasksPage() {
+function TasksPageInner() {
   const t = useTranslations("tasksPage");
+  // 详情抽屉：?id= 与 URL 双向同步（设计文档 §四）
+  const detail = useDetailParam();
   const ts = useTranslations("status");
   const router = useRouter();
   const [activeTab, setActiveTab] = React.useState("current");
@@ -1038,6 +1042,7 @@ export default function TasksPage() {
                         onArchive={queueTaskArchive}
                         selected={selectedIds.has(task.id)}
                         onSelectedChange={toggleSelected}
+                        onOpenDetail={detail.openDetail}
                       />
                     ))}
                   </TableBody>
@@ -1060,7 +1065,18 @@ export default function TasksPage() {
       <TabsContent value="archived">
         <TaskArchivesPanel onChanged={load} />
       </TabsContent>
+      {/* 右侧详情抽屉：URL 带 ?id= 就打开，刷新还原、链接可分享、后退即关 */}
+      <TaskDrawer id={detail.id} open={detail.open} onClose={detail.closeDetail} />
     </Tabs>
+  );
+}
+
+// useSearchParams 必须落在 Suspense 边界内（静态导出要求）。
+export default function TasksPage() {
+  return (
+    <React.Suspense fallback={null}>
+      <TasksPageInner />
+    </React.Suspense>
   );
 }
 
@@ -1215,6 +1231,7 @@ const TaskRow = React.memo(function TaskRow({
   onArchive,
   selected,
   onSelectedChange,
+  onOpenDetail,
 }: {
   task: Task;
   nowSec: number;
@@ -1226,10 +1243,23 @@ const TaskRow = React.memo(function TaskRow({
   onArchive: (task: Task) => Promise<void>;
   selected: boolean;
   onSelectedChange: (id: string, checked: boolean) => void;
+  onOpenDetail: (id: string) => void;
 }) {
   const t = useTranslations("tasksPage");
+  // 行点击开抽屉，但行内还有复选框/改名输入/操作按钮：点在它们身上不算「点行」，
+  // 否则勾选或改名会顺手把抽屉弹开。
+  const openOnRowClick = (event: React.MouseEvent<HTMLTableRowElement>) => {
+    const target = event.target as HTMLElement;
+    if (target.closest('a,button,input,select,textarea,[role="checkbox"],[data-no-row-open]')) return;
+    if (window.getSelection()?.toString()) return;
+    onOpenDetail(task.id);
+  };
   return (
-    <TableRow className="group border-border/60" data-state={selected ? "selected" : undefined}>
+    <TableRow
+      className="group cursor-pointer border-border/60"
+      data-state={selected ? "selected" : undefined}
+      onClick={openOnRowClick}
+    >
       <TableCell>
         <Checkbox
           checked={selected}
@@ -1242,7 +1272,7 @@ const TaskRow = React.memo(function TaskRow({
       </TableCell>
       <TableCell className="font-medium">
         <div className="flex max-w-xs items-center gap-2">
-          <TaskNameEditor task={task} onRename={onRename} />
+          <TaskNameEditor task={task} onRename={onRename} onOpenDetail={onOpenDetail} />
           {task.active && <StarIcon className="size-4 shrink-0 fill-amber-400 text-amber-700 dark:text-amber-400" />}
           {taskIsPinned(task) && <PinIcon className="text-primary size-4 shrink-0" aria-label={t("row.pinnedBadge")} />}
         </div>
@@ -1335,10 +1365,14 @@ const TaskRow = React.memo(function TaskRow({
       </TableCell>
       <TableCell className="text-right">
         <div className="flex items-center justify-end gap-0.5">
-          <Button size="icon" variant="ghost" asChild aria-label={t("row.viewDetail")} title={t("row.viewDetail")}>
-            <Link href={`/function/tasks/detail?id=${encodeURIComponent(task.id)}`}>
-              <EyeIcon />
-            </Link>
+          <Button
+            size="icon"
+            variant="ghost"
+            aria-label={t("row.viewDetail")}
+            title={t("row.viewDetail")}
+            onClick={() => onOpenDetail(task.id)}
+          >
+            <EyeIcon />
           </Button>
           <TaskControlButton task={task} onControl={onControl} />
           <TaskRerunAction task={task} onRerun={onRerun} />
@@ -1351,7 +1385,15 @@ const TaskRow = React.memo(function TaskRow({
   );
 });
 
-function TaskNameEditor({ task, onRename }: { task: Task; onRename: (task: Task, name: string) => Promise<void> }) {
+function TaskNameEditor({
+  task,
+  onRename,
+  onOpenDetail,
+}: {
+  task: Task;
+  onRename: (task: Task, name: string) => Promise<void>;
+  onOpenDetail?: (id: string) => void;
+}) {
   const t = useTranslations("tasksPage");
   const [editing, setEditing] = React.useState(false);
   const [name, setName] = React.useState(task.name ?? "");
@@ -1421,13 +1463,27 @@ function TaskNameEditor({ task, onRename }: { task: Task; onRename: (task: Task,
 
   return (
     <div className="flex min-w-0 items-center gap-1">
-      <Link
-        href={`/function/tasks/detail?id=${encodeURIComponent(task.id)}`}
-        className="min-w-0 truncate rounded-sm hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        title={task.name?.trim() ? task.name : task.description}
-      >
-        {task.name?.trim() ? task.name : <span className="text-muted-foreground">{t("row.unnamed")}</span>}
-      </Link>
+      {onOpenDetail ? (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onOpenDetail(task.id);
+          }}
+          className="min-w-0 truncate rounded-sm text-left hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          title={task.name?.trim() ? task.name : task.description}
+        >
+          {task.name?.trim() ? task.name : <span className="text-muted-foreground">{t("row.unnamed")}</span>}
+        </button>
+      ) : (
+        <Link
+          href={`/function/tasks/detail?id=${encodeURIComponent(task.id)}`}
+          className="min-w-0 truncate rounded-sm hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          title={task.name?.trim() ? task.name : task.description}
+        >
+          {task.name?.trim() ? task.name : <span className="text-muted-foreground">{t("row.unnamed")}</span>}
+        </Link>
+      )}
       <Button
         type="button"
         variant="ghost"

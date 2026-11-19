@@ -20,6 +20,7 @@ import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { AssetDslSearch } from "@/components/asset-dsl-search";
+import { AssetDrawer } from "@/components/domain/asset-drawer";
 import { ScopeTextEditor } from "@/components/scope-text-editor";
 import {
   AlertDialog,
@@ -59,6 +60,7 @@ import {
 } from "@/components/ui/sheet";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useDetailParam } from "@/hooks/use-detail-param";
 import { api } from "@/lib/api";
 import { parseCompanyScopeText } from "@/lib/company-scope";
 import type { Asset, Company, CompanyScopeRule } from "@/lib/types";
@@ -108,8 +110,12 @@ const TABS: { key: string; labelKey: string; icon: LucideIcon }[] = [
   { key: "endpoint", labelKey: "endpoint", icon: LinkIcon },
 ];
 
-export default function AssetsPage() {
+function AssetsPageInner() {
   const t = useTranslations("assets");
+  // 详情抽屉：?id= 与 URL 双向同步（设计文档 §四）
+  const detail = useDetailParam();
+  // 点开时先把行对象递给抽屉，省一次 /assets 请求；深链还原时抽屉自己查。
+  const [detailAsset, setDetailAsset] = React.useState<Asset | null>(null);
   const [rows, setRows] = React.useState<Asset[]>([]);
   const [total, setTotal] = React.useState(0);
   const [companies, setCompanies] = React.useState<Company[]>([]);
@@ -314,8 +320,22 @@ export default function AssetsPage() {
     />
   );
 
+  // 资产表在子组件里，行上带 data-asset-id，这里统一代理点击：
+  // 点复选框/按钮/链接不算「点行」，避免勾选时把抽屉弹开。
+  function openAssetFromEvent(event: React.MouseEvent<HTMLDivElement>) {
+    const target = event.target as HTMLElement;
+    if (target.closest('a,button,input,select,textarea,[role="checkbox"],[data-no-row-open]')) return;
+    const row = target.closest<HTMLElement>("[data-asset-id]");
+    const raw = row?.dataset.assetId;
+    if (!raw) return;
+    if (window.getSelection()?.toString()) return;
+    const idNum = Number(raw);
+    setDetailAsset(rows.find((item) => item.id === idNum) ?? null);
+    detail.openDetail(raw);
+  }
+
   return (
-    <div className="flex h-[calc(100vh-6rem)] min-h-0 flex-col gap-4">
+    <div className="flex h-[calc(100vh-6rem)] min-h-0 flex-col gap-4" onClick={openAssetFromEvent}>
       <div className="flex items-center justify-between gap-4">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">{t("title")}</h1>
@@ -437,7 +457,11 @@ export default function AssetsPage() {
             onToggleAll={(ids) => toggleSelectAll(ids)}
           >
             {slice(tabData("root_domain")).map((a) => (
-              <TableRow key={a.id} className={selected.has(a.id) ? "bg-muted/40" : undefined}>
+              <TableRow
+                key={a.id}
+                data-asset-id={a.id}
+                className={cn("cursor-pointer", selected.has(a.id) && "bg-muted/40")}
+              >
                 <TableCell className="w-8 pr-0">
                   <Checkbox checked={selected.has(a.id)} onCheckedChange={() => toggleSelect(a.id)} />
                 </TableCell>
@@ -478,7 +502,11 @@ export default function AssetsPage() {
             onToggleAll={(ids) => toggleSelectAll(ids)}
           >
             {slice(tabData("ip")).map((a) => (
-              <TableRow key={a.id} className={selected.has(a.id) ? "bg-muted/40" : undefined}>
+              <TableRow
+                key={a.id}
+                data-asset-id={a.id}
+                className={cn("cursor-pointer", selected.has(a.id) && "bg-muted/40")}
+              >
                 <TableCell className="w-8 pr-0">
                   <Checkbox checked={selected.has(a.id)} onCheckedChange={() => toggleSelect(a.id)} />
                 </TableCell>
@@ -525,7 +553,11 @@ export default function AssetsPage() {
             onToggleAll={(ids) => toggleSelectAll(ids)}
           >
             {slice(tabData("subdomain")).map((a) => (
-              <TableRow key={a.id} className={selected.has(a.id) ? "bg-muted/40" : undefined}>
+              <TableRow
+                key={a.id}
+                data-asset-id={a.id}
+                className={cn("cursor-pointer", selected.has(a.id) && "bg-muted/40")}
+              >
                 <TableCell className="w-8 pr-0">
                   <Checkbox checked={selected.has(a.id)} onCheckedChange={() => toggleSelect(a.id)} />
                 </TableCell>
@@ -567,7 +599,11 @@ export default function AssetsPage() {
             onToggleAll={(ids) => toggleSelectAll(ids)}
           >
             {slice(tabData("app")).map((a) => (
-              <TableRow key={a.id} className={selected.has(a.id) ? "bg-muted/40" : undefined}>
+              <TableRow
+                key={a.id}
+                data-asset-id={a.id}
+                className={cn("cursor-pointer", selected.has(a.id) && "bg-muted/40")}
+              >
                 <TableCell className="w-8 pr-0">
                   <Checkbox checked={selected.has(a.id)} onCheckedChange={() => toggleSelect(a.id)} />
                 </TableCell>
@@ -636,7 +672,11 @@ export default function AssetsPage() {
                 domainCell = a.domain;
               }
               return (
-                <TableRow key={a.id} className={selected.has(a.id) ? "bg-muted/40" : undefined}>
+                <TableRow
+                key={a.id}
+                data-asset-id={a.id}
+                className={cn("cursor-pointer", selected.has(a.id) && "bg-muted/40")}
+              >
                   <TableCell className="w-8 pr-0">
                     <Checkbox checked={selected.has(a.id)} onCheckedChange={() => toggleSelect(a.id)} />
                   </TableCell>
@@ -714,7 +754,11 @@ export default function AssetsPage() {
             onToggleAll={(ids) => toggleSelectAll(ids)}
           >
             {slice(tabData("endpoint")).map((a) => (
-              <TableRow key={a.id} className={selected.has(a.id) ? "bg-muted/40" : undefined}>
+              <TableRow
+                key={a.id}
+                data-asset-id={a.id}
+                className={cn("cursor-pointer", selected.has(a.id) && "bg-muted/40")}
+              >
                 <TableCell className="w-8 pr-0">
                   <Checkbox checked={selected.has(a.id)} onCheckedChange={() => toggleSelect(a.id)} />
                 </TableCell>
@@ -828,7 +872,26 @@ export default function AssetsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      {/* 抽屉在滚动容器外，滚列表时不跟着动 */}
+      <AssetDrawer
+        id={detail.id}
+        open={detail.open}
+        onClose={() => {
+          setDetailAsset(null);
+          detail.closeDetail();
+        }}
+        asset={detailAsset && String(detailAsset.id) === detail.id ? detailAsset : null}
+      />
     </div>
+  );
+}
+
+// useSearchParams 必须落在 Suspense 边界内（静态导出要求）。
+export default function AssetsPage() {
+  return (
+    <React.Suspense fallback={null}>
+      <AssetsPageInner />
+    </React.Suspense>
   );
 }
 
