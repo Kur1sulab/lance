@@ -2456,7 +2456,9 @@
       "unpinned": "任务 #{id} 已取消置顶",
       "pinFailed": "{pinned, select, yes {取消置顶失败：{msg}} other {置顶失败：{msg}}}",
       "archiveQueued": "任务 #{id} 已进入归档队列",
-      "archiveFailed": "归档失败：{msg}"
+      "archiveFailed": "归档失败：{msg}",
+      "rerunCreated": "任务 #{id} 已从任务 #{from} 重跑",
+      "rerunFailed": "重跑失败：{msg}"
     },
     "row": {
       "selectAria": "选择任务 {id}",

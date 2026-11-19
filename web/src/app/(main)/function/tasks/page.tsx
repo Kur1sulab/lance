@@ -3,6 +3,7 @@
 import * as React from "react";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 import {
   DndContext,
@@ -33,6 +34,7 @@ import {
   PinOffIcon,
   PlayIcon,
   PlusIcon,
+  RotateCwIcon,
   SaveIcon,
   SearchIcon,
   SlidersHorizontalIcon,
@@ -245,6 +247,9 @@ const UNCATEGORIZED_VALUE = "uncategorized";
 // 两边不会出现一个可点、另一个不可点的分歧。
 const PAUSABLE_STATUSES = new Set<TaskStatus>(["created", "queued", "running"]);
 const ARCHIVABLE_STATUSES = new Set<TaskStatus>(["paused", "done", "failed", "timeout"]);
+// 可重跑 = 终态(done/failed/timeout),与后端 rerunTask 的终态门禁一致;
+// 运行中/排队中/暂停中不显示重跑入口(后端也会 409 拒绝)。
+const RERUNNABLE_STATUSES = new Set<TaskStatus>(["done", "failed", "timeout"]);
 
 function taskControlAction(status: TaskStatus): "pause" | "resume" | null {
   if (status === "paused") return "resume";
@@ -303,6 +308,7 @@ function compareTasks(left: Task, right: Task, field: TaskSortField, direction: 
 export default function TasksPage() {
   const t = useTranslations("tasksPage");
   const ts = useTranslations("status");
+  const router = useRouter();
   const [activeTab, setActiveTab] = React.useState("current");
   const [tasks, setTasks] = React.useState<Task[]>([]);
   const [categories, setCategories] = React.useState<TaskCategory[]>([]);
@@ -564,6 +570,26 @@ export default function TasksPage() {
       }
     },
     [load, t],
+  );
+
+  // 任务级重跑:后端克隆原任务元数据(描述/目标/范围/公司/LLM 链/超时/拦截规则)
+  // 建新任务并启动,返回新任务 DTO。成功吐出新任务 id、刷新列表并跳转新任务详情。
+  const rerunTask = React.useCallback(
+    async (task: Task) => {
+      try {
+        const created = await api.rerunTask(task.id);
+        toast.success(t("toast.rerunCreated", { id: created.id, from: task.id }));
+        lastRef.current = "";
+        load();
+        router.push(`/function/tasks/detail?id=${encodeURIComponent(created.id)}`);
+      } catch (e) {
+        toast.error(t("toast.rerunFailed", { msg: (e as Error).message }));
+        lastRef.current = "";
+        load();
+        throw e;
+      }
+    },
+    [load, router, t],
   );
 
   const renameTask = React.useCallback(
@@ -1006,6 +1032,7 @@ export default function TasksPage() {
                         nowSec={task.status === "running" ? nowSec : 0}
                         onDelete={deleteTask}
                         onControl={controlTask}
+                        onRerun={rerunTask}
                         onRename={renameTask}
                         onTogglePinned={toggleTaskPinned}
                         onArchive={queueTaskArchive}
@@ -1182,6 +1209,7 @@ const TaskRow = React.memo(function TaskRow({
   nowSec,
   onDelete,
   onControl,
+  onRerun,
   onRename,
   onTogglePinned,
   onArchive,
@@ -1192,6 +1220,7 @@ const TaskRow = React.memo(function TaskRow({
   nowSec: number;
   onDelete: (id: string, options: DeleteTaskOptions) => Promise<void>;
   onControl: (id: string, action: "pause" | "resume") => Promise<void>;
+  onRerun: (task: Task) => Promise<void>;
   onRename: (task: Task, name: string) => Promise<void>;
   onTogglePinned: (task: Task) => Promise<void>;
   onArchive: (task: Task) => Promise<void>;
@@ -1312,6 +1341,7 @@ const TaskRow = React.memo(function TaskRow({
             </Link>
           </Button>
           <TaskControlButton task={task} onControl={onControl} />
+          <TaskRerunAction task={task} onRerun={onRerun} />
           <TaskPinAction task={task} onTogglePinned={onTogglePinned} />
           <TaskArchiveAction task={task} onArchive={onArchive} />
           <DeleteTaskDialog task={task} onDelete={onDelete} />
@@ -1487,6 +1517,37 @@ function TaskControlButton({
       }}
     >
       {taskControlIcon(pending, action)}
+    </Button>
+  );
+}
+
+// TaskRerunAction 是行内「重跑」入口:只在终态(done/failed/timeout)显示,
+// 运行中/排队中/暂停中直接不渲染(后端 rerunTask 也会 409 拒绝非终态)。
+// 点击后克隆原任务元数据建新任务并启动,成功跳转新任务详情页。
+function TaskRerunAction({ task, onRerun }: { task: Task; onRerun: (task: Task) => Promise<void> }) {
+  const t = useTranslations("tasksPage");
+  const [pending, setPending] = React.useState(false);
+  if (!RERUNNABLE_STATUSES.has(task.status) || task.queued) return null;
+  const label = t("row.rerunTask");
+  return (
+    <Button
+      size="icon"
+      variant="ghost"
+      aria-label={t("row.rerunAria", { id: task.id })}
+      title={label}
+      disabled={pending}
+      onClick={async () => {
+        setPending(true);
+        try {
+          await onRerun(task);
+        } catch {
+          // 错误 toast 已由 onRerun 统一弹出;这里只复位按钮。
+        } finally {
+          setPending(false);
+        }
+      }}
+    >
+      {pending ? <Loader2Icon className="animate-spin" /> : <RotateCwIcon />}
     </Button>
   );
 }

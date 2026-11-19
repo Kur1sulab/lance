@@ -830,6 +830,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/task-archives", s.listTaskArchives)
 	mux.HandleFunc("GET /api/task-archives/{id}", s.getTaskArchive)
 	mux.HandleFunc("POST /api/tasks/{id}/archive", s.queueTaskArchive)
+	mux.HandleFunc("POST /api/tasks/{id}/rerun", s.rerunTask) // 任务级重跑:终态任务克隆元数据建新任务并启动
 	mux.HandleFunc("POST /api/tasks/archive/batch", s.queueTaskArchivesBatch)
 	mux.HandleFunc("POST /api/task-archives/{id}/restore", s.queueTaskArchiveRestore)
 	mux.HandleFunc("POST /api/task-archives/restore/batch", s.restoreTaskArchivesBatch)

@@ -39,6 +39,9 @@ export interface Task {
   archive_blocked_by_task_id?: string; // live direct dependent that must be archived first
   company_ids?: number[]; // associated company scopes; current company assets join the task at creation
   coverage_enabled?: boolean; // 资产覆盖度功能开关(创建时定,默认开)；false=不计算/不展示覆盖度
+  parent_ref?: string; // 父任务 id(编排 spawn / 任务重跑来源)；空=顶层任务
+  timeout_seconds?: number; // 任务级超时(秒)；0=不限时
+  plan_heartbeat_seconds?: number; // planner 心跳间隔(秒)
 }
 
 export interface TaskCategory {

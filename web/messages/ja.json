@@ -2456,7 +2456,9 @@
       "unpinned": "タスク #{id} の固定を解除しました",
       "pinFailed": "{pinned, select, yes {固定の解除に失敗しました: {msg}} other {固定に失敗しました: {msg}}}",
       "archiveQueued": "タスク #{id} をアーカイブのキューに追加しました",
-      "archiveFailed": "アーカイブに失敗しました: {msg}"
+      "archiveFailed": "アーカイブに失敗しました: {msg}",
+      "rerunCreated": "タスク #{id} をタスク #{from} から再実行しました",
+      "rerunFailed": "再実行に失敗しました: {msg}"
     },
     "row": {
       "selectAria": "タスク {id} を選択",

@@ -347,6 +347,8 @@ export const api = {
   },
   taskArchive: (id: number) => get<TaskArchive>(`/task-archives/${id}`),
   archiveTask: (id: string) => post<TaskArchive>(`/tasks/${id}/archive`),
+  // 任务级重跑:仅终态(done/failed/timeout)任务可重跑;后端克隆元数据建新任务并启动。
+  rerunTask: (id: string) => post<Task>(`/tasks/${id}/rerun`),
   archiveTasks: (taskIds: string[]) =>
     post<{ items: ArchiveBatchItem[] }>("/tasks/archive/batch", { task_ids: taskIds }),
   restoreTaskArchive: (id: number) => post<TaskArchive>(`/task-archives/${id}/restore`),
