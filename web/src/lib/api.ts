@@ -43,6 +43,8 @@ import type {
   FindingRetest,
   FindingStats,
   FindingStatus,
+  FindingVerificationStatus,
+  VerificationMetrics,
   FindingsPage,
   FindingTraffic,
   FindingTrafficDetail,
@@ -576,6 +578,33 @@ export const api = {
   findingAssetTree: (q: Omit<FindingQuery, "page" | "pageSize">) =>
     get<FindingAssetTree>(`/exploration/findings/asset-tree?${findingFilterParams(q).toString()}`),
   findingStats: () => get<FindingStats>("/exploration/findings/stats"),
+  // 6.2 验证闸门：两个一等指标 + 单条判定/重放。
+  verificationMetrics: (taskId?: string) =>
+    get<VerificationMetrics>(`/metrics/verification${taskId ? `?task_id=${encodeURIComponent(taskId)}` : ""}`),
+  findingVerification: (id: string) =>
+    get<{
+      status: FindingVerificationStatus;
+      method: string;
+      actor: string;
+      note: string;
+      ground_truth: string;
+      verified_at?: string;
+      evidence_count: number;
+      replayable: boolean;
+      allowed_next: FindingVerificationStatus[];
+    }>(`/exploration/findings/${id}/verification`),
+  // 判定只接受环境 ground-truth：method 必须是 replay / manual_replay / target_response，
+  // 且必须附 ground_truth（真实响应片段或独立复现输出）。后端会拒绝 LLM/Agent 自报。
+  setFindingVerification: (
+    id: string,
+    body: { status: "verified" | "refuted" | "unreproducible"; method: string; actor: string; note?: string; ground_truth: string },
+  ) => post<{ status: FindingVerificationStatus }>(`/exploration/findings/${id}/verification`, body),
+  // 凭证据重放一次：只记录事实（是否拿到真实响应），不自动改验证状态。
+  replayFindingEvidence: (id: string, body?: { binding_id?: string }) =>
+    post<{ replay: { replayed: boolean; status_code: number; matches_original: boolean } }>(
+      `/exploration/findings/${id}/replay`,
+      body ?? {},
+    ),
   // exportFindings 触发发现页导出并下载文件。scope=selected 时传 ids(finding_id 列表);
   // scope=filtered 时传当前筛选(沿用 FindingQuery 的筛选字段);scope=all 忽略筛选。
   exportFindings: async (opts: {
@@ -594,6 +623,15 @@ export const api = {
     const r = await fetch(`/api/exploration/findings/export?${p.toString()}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
+    if (r.status === 409) {
+      // 6.2 验证闸门：后端硬拦未验证的发现。把被拦条目数和原因原样带出去，
+      // 让调用页能提示「去补判定」而不是干瞪眼一句 409。
+      const gate = (await r.json().catch(() => null)) as
+        | { error?: string; reason?: string; blocked?: { id: string; name: string }[] }
+        | null;
+      const n = gate?.blocked?.length ?? 0;
+      throw new Error(gate ? `${gate.error ?? "导出被拦截"}（${n} 条未验证）：${gate.reason ?? ""}` : `export: 409`);
+    }
     if (!r.ok) throw new Error(`export: ${r.status}`);
     const blob = await r.blob();
     // 文件名优先取后端 Content-Disposition,取不到则用默认名。

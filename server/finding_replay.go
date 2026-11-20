@@ -1,41 +1,24 @@
 package server
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
-	"crypto/tls"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
-	"time"
-	"unicode/utf8"
 
 	"github.com/Kur1sulab/lance/db"
+	"github.com/Kur1sulab/lance/evidence"
 	"github.com/Kur1sulab/lance/intercept"
 	actool "github.com/Kur1sulab/norma/tool"
 )
 
-// 复测重放的一次性边界。这些都是「一次请求」的量级，不涉及全量扫描：
-//   - 请求体按快照的 ReqLen 读，超限直接判失败而不是截断（截断后重放等于换了
-//     一个请求，结论会失真，不如明确报错）。
-//   - 响应只读前 replayMaxRespRead 字节做预览；哈希是对完整响应流计算的，
-//     因此 matches_original 仍然可比。
-const (
-	replayMaxBody     = 4 << 20
-	replayMaxRespRead = 1 << 20
-	replayPreviewByte = 1500
-	replayTimeout     = 45 * time.Second
-)
-
-// replayFindingTraffic 的判定语义：它只负责「发一次请求并把事实摆出来」，
-// 不产生 verdict。verdict 由 record_finding_retest_result 依据本次实测 +
+// 复测重放的判定语义：它只负责「发一次请求并把事实摆出来」，不产生 verdict。
+// verdict 由 record_finding_retest_result 依据本次实测 +
 // 原证据给出，两者分开才能让「一次请求失败不等于已修复」这条规则落得下地。
+//
+// 传输层实现在 evidence.Replay —— 与 6.2 的可重放率指标共用同一份代码，
+// 避免「工具能重放、指标算不出可重放」这种两套实现的口径分裂。
 func (s *Server) replayFindingTrafficTool() actool.CoreTool {
 	return wrTool("replay_finding_traffic",
 		"按当前复测漏洞绑定的原始流量快照重放一次真实请求（不是读取历史记录，是真的再发一次），返回本次实际状态码、响应长度、响应哈希与原响应的比对及响应预览。可选改写请求体/URL 查询串/补充请求头用于对照验证（如把 payload 换回原值、补登录 Cookie、加 X-Forwarded-For）。只能重放已绑定到本漏洞的快照，不能指定任意目标。一次未命中不能证明已修复，请结合原证据判断。",
@@ -81,122 +64,54 @@ func (s *Server) replayFindingTraffic(ctx context.Context, in json.RawMessage) (
 	}
 	snap := binding.Snapshot
 
-	target := strings.TrimSpace(snap.URL)
-	if a.URL != "" {
-		if target, err = sameHostOverride(snap.URL, strings.TrimSpace(a.URL)); err != nil {
-			return actool.Errorf(err.Error()), nil
-		}
-	}
-	u, err := url.Parse(target)
-	if err != nil || u.Host == "" {
-		return actool.Errorf("快照 URL 无效，无法重放: " + snap.URL), nil
-	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return actool.Errorf("快照 URL 协议不支持重放: " + u.Scheme), nil
-	}
-
-	body, bodySource, err := s.replayRequestBody(snap, a.Payload)
+	out, err := s.evidenceStore().Replay(ctx, snap, evidence.ReplayOptions{
+		PayloadOverride: a.Payload,
+		URLOverride:     strings.TrimSpace(a.URL),
+		HeaderOverride:  a.Headers,
+	})
 	if err != nil {
 		return actool.Errorf(err.Error()), nil
 	}
-	method := strings.TrimSpace(snap.Method)
-	if method == "" {
-		method = http.MethodGet
+
+	findingID := strconv.FormatInt(r.FindingID, 10)
+	bindingID := strconv.FormatInt(binding.ID, 10)
+	request := map[string]any{"method": out.Method, "url": out.URL}
+
+	if !out.Replayed {
+		res := map[string]any{
+			"finding_id": findingID,
+			"binding_id": bindingID,
+			"replayed":   false,
+			"request":    request,
+			"error":      out.Err,
+			"elapsed_ms": out.ElapsedMS,
+			"note":       strings.TrimSpace(a.Note),
+			"interpretation": "本次请求根本没有拿到响应（连接/DNS/TLS/超时层面失败），既不能证明仍可复现，" +
+				"也不能证明已修复；结论应为 inconclusive 并写清失败原因。",
+		}
+		if out.StatusCode != 0 {
+			res["response"] = map[string]any{"status": out.StatusCode}
+		}
+		return jsonResult(res)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, u.String(), bytes.NewReader(body))
-	if err != nil {
-		return actool.Errorf("构造重放请求失败: " + err.Error()), nil
-	}
-	sent := applyReplayHeaders(req, snap.ReqHead, a.Headers)
-
-	client := &http.Client{
-		Timeout: replayTimeout,
-		// 复测要看到目标对这一次请求的原始回应：不跟随跳转、不走环境代理、
-		// 不校验证书（渗透目标常见自签/内部 CA）。
-		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-		Transport: &http.Transport{
-			Proxy:              nil,
-			TLSClientConfig:    &tls.Config{InsecureSkipVerify: true},
-			DisableCompression: true,
-		},
-	}
-
-	started := time.Now()
-	resp, err := client.Do(req)
-	elapsed := time.Since(started).Milliseconds()
-	if err != nil {
-		return jsonResult(map[string]any{
-			"finding_id":     strconv.FormatInt(r.FindingID, 10),
-			"binding_id":     strconv.FormatInt(binding.ID, 10),
-			"replayed":       false,
-			"request":        map[string]any{"method": method, "url": target},
-			"error":          err.Error(),
-			"elapsed_ms":     elapsed,
-			"note":           strings.TrimSpace(a.Note),
-			"interpretation": "本次请求根本没有拿到响应（连接/DNS/TLS/超时层面失败），既不能证明仍可复现，也不能证明已修复；结论应为 inconclusive 并写清失败原因。",
-		})
-	}
-	defer resp.Body.Close()
-
-	hasher := sha256.New()
-	preview := make([]byte, 0, replayPreviewByte)
-	limited := io.LimitReader(resp.Body, replayMaxRespRead)
-	buf := make([]byte, 32<<10)
-	var total int64
-	for {
-		n, rerr := limited.Read(buf)
-		if n > 0 {
-			total += int64(n)
-			hasher.Write(buf[:n])
-			if room := replayPreviewByte - len(preview); room > 0 {
-				take := n
-				if take > room {
-					take = room
-				}
-				preview = append(preview, buf[:take]...)
-			}
-		}
-		if rerr == io.EOF {
-			break
-		}
-		if rerr != nil {
-			return jsonResult(map[string]any{
-				"finding_id": strconv.FormatInt(r.FindingID, 10),
-				"binding_id": strconv.FormatInt(binding.ID, 10),
-				"replayed":   false,
-				"request":    map[string]any{"method": method, "url": target},
-				"response":   map[string]any{"status": resp.StatusCode},
-				"error":      "读取响应体中断: " + rerr.Error(),
-				"elapsed_ms": elapsed,
-			})
-		}
-		if total >= replayMaxRespRead {
-			break
-		}
-	}
-	respHash := hex.EncodeToString(hasher.Sum(nil))
-	matches := snap.RespHash != "" && strings.EqualFold(snap.RespHash, respHash)
+	request["body_source"] = out.BodySource
+	request["body_len"] = out.BodyLen
+	request["headers"] = out.Headers
 
 	return jsonResult(map[string]any{
-		"finding_id": strconv.FormatInt(r.FindingID, 10),
-		"binding_id": strconv.FormatInt(binding.ID, 10),
+		"finding_id": findingID,
+		"binding_id": bindingID,
 		"replayed":   true,
-		"request": map[string]any{
-			"method":      method,
-			"url":         target,
-			"body_source": bodySource,
-			"body_len":    len(body),
-			"headers":     sent,
-		},
+		"request":    request,
 		"response": map[string]any{
-			"status":           resp.StatusCode,
-			"status_text":      resp.Status,
-			"resp_len_read":    total,
-			"resp_sha256":      respHash,
-			"matches_original": matches,
-			"content_type":     resp.Header.Get("Content-Type"),
-			"preview":          utf8Preview(preview),
+			"status":           out.StatusCode,
+			"status_text":      out.StatusText,
+			"resp_len_read":    out.RespLenRead,
+			"resp_sha256":      out.RespSHA256,
+			"matches_original": out.MatchesOriginal,
+			"content_type":     out.ContentType,
+			"preview":          out.Preview,
 		},
 		"original": map[string]any{
 			"status":      snap.Status,
@@ -205,35 +120,14 @@ func (s *Server) replayFindingTraffic(ctx context.Context, in json.RawMessage) (
 			"method":      snap.Method,
 			"url":         snap.URL,
 		},
-		"elapsed_ms":     elapsed,
-		"note":           strings.TrimSpace(a.Note),
-		"interpretation": "这是本次真实发出的一个请求。matches_original=true 表示响应体与原始证据逐字节一致（行为未变）；不同则要结合状态码与原 PoC 的关键特征判断是「已修复」还是「环境/前置条件不同导致未命中」。单次未命中不足以判 fixed。",
+		"elapsed_ms": out.ElapsedMS,
+		"note":       strings.TrimSpace(a.Note),
+		"interpretation": "这是本次真实发出的一个请求。matches_original=true 表示响应体与原始证据逐字节一致（行为未变）；" +
+			"不同则要结合状态码与原 PoC 的关键特征判断是「已修复」还是「环境/前置条件不同导致未命中」。单次未命中不足以判 fixed。",
 	})
 }
 
-// replayRequestBody 优先用调用方给的 payload 做对照，否则按快照原样取回请求体。
-func (s *Server) replayRequestBody(snap db.TrafficEvidenceSnapshot, override string) ([]byte, string, error) {
-	if override != "" {
-		return []byte(override), "override", nil
-	}
-	if snap.ReqLen <= 0 {
-		return nil, "empty", nil
-	}
-	if snap.ReqLen > replayMaxBody {
-		return nil, "", fmt.Errorf("原始请求体 %d 字节超过重放上限 %d，请用 payload_override 显式给出要重放的内容", snap.ReqLen, replayMaxBody)
-	}
-	f, n, err := s.evidenceStore().OpenBody(snap, "request")
-	if err != nil {
-		return nil, "", fmt.Errorf("读取原始请求体失败: %w", err)
-	}
-	defer f.Close()
-	body, err := io.ReadAll(io.LimitReader(f, n))
-	if err != nil {
-		return nil, "", fmt.Errorf("读取原始请求体失败: %w", err)
-	}
-	return body, "snapshot", nil
-}
-
+// pickReplayBinding 选中要重放的绑定：显式 id 优先，否则第一条 request 角色，再退第一条。
 func pickReplayBinding(list []db.FindingTrafficBinding, want string) (db.FindingTrafficBinding, error) {
 	if want != "" {
 		id, err := strconv.ParseInt(strings.TrimSpace(want), 10, 64)
@@ -253,103 +147,4 @@ func pickReplayBinding(list []db.FindingTrafficBinding, want string) (db.Finding
 		}
 	}
 	return list[0], nil
-}
-
-// sameHostOverride 允许改路径/查询串做参数对照，但不允许把请求引到别的目标。
-func sameHostOverride(original, override string) (string, error) {
-	base, err := url.Parse(original)
-	if err != nil || base.Host == "" {
-		return "", fmt.Errorf("快照 URL 无效，无法比对替换 URL: %s", original)
-	}
-	next, err := url.Parse(override)
-	if err != nil || next.Host == "" {
-		return "", fmt.Errorf("url_override 无效: %s", override)
-	}
-	if !strings.EqualFold(next.Scheme, base.Scheme) || !strings.EqualFold(next.Host, base.Host) {
-		return "", fmt.Errorf("url_override 只能改路径或查询串，不能换协议或 host（原 %s://%s）", base.Scheme, base.Host)
-	}
-	return next.String(), nil
-}
-
-// applyReplayHeaders 还原快照请求头，再叠加调用方的覆盖项，返回最终发出去的头摘要。
-//
-// 兼容两种落库形态：带请求行的完整报文头（抓包原样）与只有头的块。Go 自管的
-// 逐跳头（Content-Length/Transfer-Encoding/Connection）一律跳过，否则请求会被
-// 自己写坏；Host 走 req.Host 才能生效。
-func applyReplayHeaders(req *http.Request, head, override string) []string {
-	sent := make([]string, 0, 12)
-	set := func(name, value string) {
-		lower := strings.ToLower(name)
-		switch lower {
-		case "host":
-			req.Host = value
-		case "content-length", "transfer-encoding", "connection", "proxy-connection", "keep-alive", "upgrade":
-			return
-		default:
-			req.Header.Set(name, value)
-		}
-		for i, line := range sent {
-			if strings.HasPrefix(strings.ToLower(line), lower+":") {
-				sent[i] = name + ": " + value
-				return
-			}
-		}
-		sent = append(sent, name+": "+value)
-	}
-	first := true
-	for _, line := range strings.Split(head, "\n") {
-		line = strings.TrimRight(line, "\r")
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		if first && looksLikeRequestLine(line) {
-			first = false
-			continue
-		}
-		first = false
-		name, value, ok := strings.Cut(line, ":")
-		if !ok {
-			continue
-		}
-		if name = strings.TrimSpace(name); name == "" {
-			continue
-		}
-		set(name, strings.TrimSpace(value))
-	}
-	for _, line := range strings.Split(override, "\n") {
-		line = strings.TrimRight(line, "\r")
-		name, value, ok := strings.Cut(line, ":")
-		if !ok {
-			continue
-		}
-		if name = strings.TrimSpace(name); name == "" {
-			continue
-		}
-		set(name, strings.TrimSpace(value))
-	}
-	return sent
-}
-
-func looksLikeRequestLine(line string) bool {
-	fields := strings.Fields(line)
-	if len(fields) < 3 {
-		return false
-	}
-	if !strings.HasPrefix(strings.ToUpper(fields[len(fields)-1]), "HTTP/") {
-		return false
-	}
-	for _, c := range fields[0] {
-		if c < 'A' || c > 'Z' {
-			return false
-		}
-	}
-	return fields[0] != ""
-}
-
-func utf8Preview(b []byte) string {
-	s := string(b)
-	if utf8.ValidString(s) {
-		return s
-	}
-	return strings.ToValidUTF8(s, "\uFFFD")
 }

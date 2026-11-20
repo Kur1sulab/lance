@@ -1494,6 +1494,18 @@
         "verification": "補足検証",
         "supporting": "補助証拠"
       }
+    },
+    "verification": {
+      "title": "検証品質",
+      "replayable": "再現可能率",
+      "falsePositive": "誤検知率",
+      "unverified": "未検証",
+      "pendingGate": "検証ゲート未通過のためレポート対象外",
+      "groundTruth": "判定は環境のground-truthのみ（LLMの自己申告は不可）",
+      "verified": "検証済み",
+      "refuted": "反証済み",
+      "unreproducible": "再現不可",
+      "sample": "サンプル"
     }
   },
   "copyButton": {

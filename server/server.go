@@ -895,6 +895,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/exploration/findings/asset-tree", s.findingAssetTree)
 	mux.HandleFunc("GET /api/exploration/findings/stats", s.findingStats)
 	mux.HandleFunc("GET /api/exploration/findings/export", s.findingsExport)
+	// 6.2 验证质量闸门：判定入口 + 两个一等指标 + 按证据重放。
+	// 导出路径只放行 verified（见 findingsExport 里的硬拦截）。
+	mux.HandleFunc("GET /api/metrics/verification", s.getVerificationMetrics)
+	mux.HandleFunc("GET /api/exploration/findings/{id}/verification", s.getFindingVerification)
+	mux.HandleFunc("POST /api/exploration/findings/{id}/verification", s.setFindingVerification)
+	mux.HandleFunc("POST /api/exploration/findings/{id}/replay", s.replayFindingEvidence)
 	s.registerFindingTraffic(mux)
 	mux.HandleFunc("GET /api/exploration/findings/{id}", s.getFinding)
 	mux.HandleFunc("GET /api/exploration/findings/{id}/lineage", s.findingLineage)
@@ -2281,6 +2287,34 @@ func (s *Server) findingsExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 6.2 验证闸门（硬拦，不是前端隐藏）：
+	//   只有 verification_status='verified' 的发现允许进报告。未过闸门的条目
+	//   既不进 md/zip，也不进 csv/json —— 宁可整体 409 并列出被拦条目，
+	//   也不静默丢数据：静默丢弃会让报告看起来比实际可信，那正是误报经济学的反面。
+	verified, blocked := db.SplitByVerification(fs)
+	if rejectUnverifiedExport(w, verified, blocked) {
+		return
+	}
+	fs = verified
+
+	// 报告头部元数据：两个指标按全库口径算（导出集只剩 verified，单独统计会失真），
+	// 再补上「本报告这批可重放几条」。判定来源恒为环境 ground-truth。
+	metrics, err := s.m.pg.VerificationMetrics(r.Context(), db.VerificationMetricsFilter{})
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	exportIDs := make([]int64, 0, len(fs))
+	for _, f := range fs {
+		exportIDs = append(exportIDs, f.ID)
+	}
+	replayable, err := s.m.pg.ReplayableFindingIDs(r.Context(), exportIDs)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	meta := report.VerificationMeta{Metrics: *metrics, ExportCount: len(fs), ExportReplayable: len(replayable)}
+
 	stage, err := os.MkdirTemp("", "lance-finding-export-")
 	if err != nil {
 		writeErr(w, 500, err.Error())
@@ -2301,10 +2335,10 @@ func (s *Server) findingsExport(w http.ResponseWriter, r *http.Request) {
 	switch format {
 	case "md-single":
 		setDownload("text/markdown; charset=utf-8", "findings-"+stamp+".md")
-		_, _ = w.Write([]byte(report.FindingsMarkdown(fs, now)))
+		_, _ = w.Write([]byte(report.FindingsMarkdown(fs, now, &meta)))
 	case "md-zip":
 		path := filepath.Join(stage, "findings.zip")
-		if err := buildFindingsEvidenceZip(path, fs, stage, now); err != nil {
+		if err := buildFindingsEvidenceZip(path, fs, stage, now, &meta); err != nil {
 			writeErr(w, 500, err.Error())
 			return
 		}
@@ -2318,7 +2352,7 @@ func (s *Server) findingsExport(w http.ResponseWriter, r *http.Request) {
 		http.ServeContent(w, r, "findings.zip", now, file)
 	case "csv":
 		setDownload("text/csv; charset=utf-8", "findings-"+stamp+".csv")
-		_, _ = w.Write(report.FindingsCSV(fs))
+		_, _ = w.Write(report.FindingsCSV(fs, &meta))
 	case "json":
 		assets := s.resolveFindingAssets(fs)
 		out := make([]FindingDTO, 0, len(fs))
@@ -4036,6 +4070,12 @@ func (s *Server) getReport(w http.ResponseWriter, r *http.Request) {
 		Title: t.Description, Goal: t.Goal, GeneratedAt: time.Now(),
 		AssetCounts: counts, Findings: findings,
 	})
+	// 6.2：本报告渲染的是探索图节点快照，不过验证闸门。必须在文末自带指标 + 警告，
+	// 否则它会变成绕过导出闸门的后门——「看起来像正式报告」是最危险的那种例外。
+	if m, mErr := s.m.pg.VerificationMetrics(r.Context(), db.VerificationMetricsFilter{}); mErr == nil {
+		md += "\n\n---\n\n" + (&report.VerificationMeta{Metrics: *m}).Header()
+		md += "\n> ⚠ 本文件是任务级快照，**未经过验证闸门过滤**。对外交付请用 `GET /api/exploration/findings/export`（只含 verified）。\n"
+	}
 	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
 	w.WriteHeader(200)
 	_, _ = w.Write([]byte(md))

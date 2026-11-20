@@ -237,6 +237,38 @@ VALUES($1,$2,$3,$4,$5) ON CONFLICT(finding_id,snapshot_id) DO NOTHING`, findingI
 
 func bumpEvidenceVersionTx(tx *sql.Tx, findingID int64) error {
 	_, err := tx.Exec(`UPDATE findings SET evidence_version=evidence_version+1 WHERE id=$1`, findingID)
+	if err != nil {
+		return err
+	}
+	// 6.2：验证判定是「基于这批证据」下的结论。证据一变，原判定的前提就没了，
+	// 必须在同一个事务里失效——否则一条过期 verified 会带着新证据进报告，
+	// 那正是闸门要防的事。这是状态机里唯一的 verified→unverified 通道。
+	return invalidateVerificationTx(tx, findingID, "证据变更（绑定新增/修改/删除），原验证判定失效，需重新判定")
+}
+
+// invalidateVerificationTx 是系统专用降级：把 finding 的验证状态退回 unverified 并留流水。
+// 只在当前已判定（verified/refuted/unreproducible）时动作；已是 unverified 就直接返回。
+func invalidateVerificationTx(tx *sql.Tx, findingID int64, reason string) error {
+	var from string
+	err := tx.QueryRow(`SELECT verification_status FROM findings WHERE id=$1`, findingID).Scan(&from)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if from == VerificationUnverified || from == "" {
+		return nil
+	}
+	if _, err = tx.Exec(`UPDATE findings SET verification_status=$2, verification_method=$3,
+			verification_note=$4, verified_at=NULL WHERE id=$1`,
+		findingID, VerificationUnverified, VerifyMethodEvidenceChanged, reason); err != nil {
+		return err
+	}
+	_, err = tx.Exec(`INSERT INTO finding_verifications
+			(finding_id, from_status, to_status, method, actor, note, ground_truth)
+		VALUES ($1,$2,$3,$4,'system',$5,'证据版本变更（evidence_version 递增）')`,
+		findingID, from, VerificationUnverified, VerifyMethodEvidenceChanged, reason)
 	return err
 }
 

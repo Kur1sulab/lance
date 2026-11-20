@@ -1494,6 +1494,18 @@
         "verification": "Supplementary verification",
         "supporting": "Supporting evidence"
       }
+    },
+    "verification": {
+      "title": "Verification quality",
+      "replayable": "Replayable rate",
+      "falsePositive": "False-positive rate",
+      "unverified": "Unverified",
+      "pendingGate": "Fails the verification gate — excluded from reports",
+      "groundTruth": "Verdicts come from environment ground-truth (replay / independent repro), never from LLM self-reports",
+      "verified": "Verified",
+      "refuted": "Refuted",
+      "unreproducible": "Unreproducible",
+      "sample": "samples"
     }
   },
   "copyButton": {

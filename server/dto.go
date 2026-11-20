@@ -321,6 +321,9 @@ type FindingDTO struct {
 	Name      string `json:"name,omitempty"` // 漏洞名称;为空时前端回退展示 vulnclass
 	Severity  string `json:"severity"`       // critical | high | medium | low
 	Status    string `json:"status"`         // pending | in_progress | confirmed | resolved | fixed | false_positive | ignored | duplicate | risk_accepted
+	// VerificationStatus 是 6.2 验证闸门的第二轴：unverified | verified | refuted | unreproducible。
+	// 只有 verified 能进报告导出——前端用它显示「未验证」提示与导出拦截原因。
+	VerificationStatus string `json:"verification_status"`
 	Summary   string `json:"summary"`
 	Evidence  string `json:"evidence"`
 	Report    string `json:"report,omitempty"` // 详细报告(Markdown);仅详情接口返回,列表为空
@@ -449,6 +452,10 @@ func findingFromDB(f *db.DBFinding, assets map[int64]*db.Asset) FindingDTO {
 	if status == "" {
 		status = db.FindingPending
 	}
+	verification := f.VerificationStatus
+	if verification == "" {
+		verification = db.VerificationUnverified
+	}
 	d := FindingDTO{
 		ID:           i64s(f.ID),
 		FindingID:    i64s(f.ID),
@@ -458,6 +465,7 @@ func findingFromDB(f *db.DBFinding, assets map[int64]*db.Asset) FindingDTO {
 		Name:      f.Name,
 		Severity:  f.Severity,
 		Status:    status,
+		VerificationStatus: verification,
 		Summary:   f.Summary,
 		Evidence:  f.Evidence,
 		Report:    f.Report,

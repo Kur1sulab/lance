@@ -196,6 +196,8 @@ func TestFindingTrafficAPIAndExport(t *testing.T) {
 	if w = req("GET", fmt.Sprintf("/api/exploration/findings/%d/traffic/%d", other.FindingID, first), ""); w.Code != 404 {
 		t.Fatal(w.Code, w.Body)
 	}
+	// 6.2 验证闸门：导出只放行 verified。本用例测的是打包格式，先按 ground-truth 判定。
+	markVerifiedForExport(t, s, f.FindingID)
 	exportURL := fmt.Sprintf("/api/exploration/findings/export?format=md-zip&scope=selected&ids=%d", f.FindingID)
 	w = req("GET", exportURL, "")
 	if w.Code != 200 {
@@ -465,6 +467,8 @@ func TestFindingTrafficUTF8SegmentsAndInheritedWrites(t *testing.T) {
 		t.Fatal("report did not record the read evidence version")
 	}
 	for _, format := range []string{"md-single", "json", "csv"} {
+		// 6.2 闸门：先过验证，再验格式。
+		markVerifiedForExport(t, s, f.FindingID)
 		w := req("GET", fmt.Sprintf("/api/exploration/findings/export?scope=selected&ids=%d&format=%s", f.FindingID, format), "")
 		if w.Code != 200 {
 			t.Fatal(format, w.Code, w.Body)

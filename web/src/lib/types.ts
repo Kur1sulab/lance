@@ -484,6 +484,34 @@ export type FindingStatus =
   | "duplicate"
   | "risk_accepted";
 
+// FindingVerificationStatus 是「是否被环境 ground-truth 证实」，与处置状态（status）正交：
+// status 说这条漏洞怎么处理，verification_status 说它有没有被真实现象证实。
+export type FindingVerificationStatus = "unverified" | "verified" | "refuted" | "unreproducible";
+
+// VerificationMetrics 是 6.2 的两个一等指标。分母口径由后端给，前端只展示 + 带样本数。
+export interface VerificationMetrics {
+  metrics: {
+    total: number;
+    verified: number;
+    refuted: number;
+    unreproducible: number;
+    unverified: number;
+    replayable: number;
+    replay_attempts: number;
+    replay_success: number;
+    replay_sample: number;
+    false_positive_sample: number;
+    replayable_rate: number;
+    false_positive_rate: number;
+    ground_truth_only: boolean;
+    rule: string;
+    generated_at: string;
+  };
+  statuses: FindingVerificationStatus[];
+  ground_truth_only: boolean;
+  rejects_llm_self_report: boolean;
+}
+
 // FindingAsset 是一个漏洞绑定的资产(已在后端预渲染 label)。
 export interface FindingAsset {
   id: string;
@@ -502,6 +530,8 @@ export interface Finding {
   name?: string; // 漏洞名称;为空时展示回退到 vulnclass
   severity: Severity;
   status: FindingStatus;
+  /** 6.2 验证闸门第二轴：只有 verified 能进报告导出。缺省视为 unverified。 */
+  verification_status?: FindingVerificationStatus;
   summary: string;
   evidence: string;
   report?: string; // 详细报告(Markdown);仅详情接口返回,列表为空

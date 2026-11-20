@@ -28,6 +28,46 @@ func sortFindingsForExport(fs []*db.DBFinding) {
 	})
 }
 
+// VerificationMeta 是写进报告头部的验证质量元数据（6.2 一等指标）。
+// 它跟着报告走，而不是只留在平台 API 里：报告一旦脱库，收件人必须能看见
+// 「这批结论的可重放率/误报率是多少、判定依据是什么」。
+type VerificationMeta struct {
+	Metrics          db.VerificationMetrics
+	ExportCount      int
+	ExportReplayable int
+}
+
+// Header 渲染报告头部的验证质量块。口径与 db.ComputeVerificationMetrics 同源。
+func (m *VerificationMeta) Header() string {
+	if m == nil {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("> **验证质量（6.2 闸门）**\n>\n")
+	fmt.Fprintf(&b, "> - 可重放率 **%.2f%%**（%d/%d 条 verified 能凭证据重放成功）\n",
+		m.Metrics.ReplayableRate*100, m.Metrics.Replayable, m.Metrics.ReplaySample)
+	fmt.Fprintf(&b, "> - 误报率 **%.2f%%**（%d/%d，refuted ÷ (verified+refuted)）\n",
+		m.Metrics.FalsePositiveRate*100, m.Metrics.Refuted, m.Metrics.FalsePositiveSample)
+	fmt.Fprintf(&b, "> - 库内样本：verified %d · refuted %d · unreproducible %d · unverified %d（共 %d）\n",
+		m.Metrics.Verified, m.Metrics.Refuted, m.Metrics.Unreproducible, m.Metrics.Unverified, m.Metrics.Total)
+	fmt.Fprintf(&b, "> - 本报告 %d 条（全部为 verified），其中可重放 %d 条\n", m.ExportCount, m.ExportReplayable)
+	b.WriteString("> - 判定依据：**环境 ground-truth**（按证据重放实测 / 独立复现 / 目标真实响应）。" +
+		"LLM 或 Agent 自报不作为判定依据。\n>\n")
+	b.WriteString("> 分母为 0 时比率记 0；样本数为 0 的指标不具统计意义，勿单独引用。\n\n")
+	return b.String()
+}
+
+// verificationLine 是单条发现里的验证状态行（zip 单文件报告用）。
+func verificationLine(f *db.DBFinding) string {
+	st := nz(f.VerificationStatus, db.VerificationUnverified)
+	if st != db.VerificationVerified {
+		// 理论上进不了导出（导出路径已硬拦），出现就说明有人绕过了闸门，
+		// 报告里必须显式暴露，而不是假装没事。
+		return fmt.Sprintf("- **验证状态**：%s（未过验证闸门，不应出现在本报告中）\n", st)
+	}
+	return "- **验证状态**：verified（环境 ground-truth 判定）\n"
+}
+
 // findingTitle 选取漏洞的可读标题：名称 → 类型 →「未分类」。
 func findingTitle(f *db.DBFinding) string {
 	return nz(f.Name, nz(f.VulnClass, "未分类"))
@@ -35,12 +75,13 @@ func findingTitle(f *db.DBFinding) string {
 
 // FindingsMarkdown 将多条 findings 整合为一份摘要报告(摘要 + 按严重程度
 // 分组，每条包含类型/状态/所属任务/证据/详细报告）。
-func FindingsMarkdown(fs []*db.DBFinding, generatedAt time.Time) string {
+func FindingsMarkdown(fs []*db.DBFinding, generatedAt time.Time, meta *VerificationMeta) string {
 	items := append([]*db.DBFinding(nil), fs...)
 	sortFindingsForExport(items)
 
 	var b strings.Builder
 	b.WriteString("# 漏洞摘要报告\n\n")
+	b.WriteString(meta.Header())
 	fmt.Fprintf(&b, "- **创建时间**：%s\n", generatedAt.Format("2006-01-02 15:04:05"))
 	fmt.Fprintf(&b, "- **漏洞总数**: %d 个\n\n", len(items))
 
@@ -70,6 +111,7 @@ func FindingsMarkdown(fs []*db.DBFinding, generatedAt time.Time) string {
 			fmt.Fprintf(&b, "- **类型**: %s\n", f.VulnClass)
 		}
 		fmt.Fprintf(&b, "- **状态**：%s\n", nz(f.Status, "pending"))
+		b.WriteString(verificationLine(f))
 		if desc := strings.TrimSpace(f.TaskDescription); desc != "" {
 			fmt.Fprintf(&b, "- **所属任务**：%s\n", desc)
 		}
@@ -92,7 +134,7 @@ func FindingsMarkdown(fs []*db.DBFinding, generatedAt time.Time) string {
 }
 
 // SingleFindingMarkdown 将单个漏洞渲染为独立的 Markdown 单条(用于「一个漏洞一个文件」的打包)。
-func SingleFindingMarkdown(f *db.DBFinding, generatedAt time.Time) string {
+func SingleFindingMarkdown(f *db.DBFinding, generatedAt time.Time, meta *VerificationMeta) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# [%s] %s\n\n", strings.ToUpper(nz(f.Severity, "info")), findingTitle(f))
 	if f.VulnClass != "" {
@@ -100,6 +142,7 @@ func SingleFindingMarkdown(f *db.DBFinding, generatedAt time.Time) string {
 	}
 	fmt.Fprintf(&b, "- **严重程度**: %s\n", nz(f.Severity, "info"))
 	fmt.Fprintf(&b, "- **状态**：%s\n", nz(f.Status, "pending"))
+	b.WriteString(verificationLine(f))
 	if desc := strings.TrimSpace(f.TaskDescription); desc != "" {
 		fmt.Fprintf(&b, "- **所属任务**：%s\n", desc)
 	}
@@ -144,14 +187,21 @@ func FindingFilename(f *db.DBFinding) string {
 // FindingsCSV 将多条 findings 渲染为 CSV(包含 UTF-8 BOM，Excel 对韩文
 // 以便正确识别）。不放入长篇 report/evidence 全文，只放摘要性质的字段。
 // 需要全文时导出为 Markdown/JSON。
-func FindingsCSV(fs []*db.DBFinding) []byte {
+func FindingsCSV(fs []*db.DBFinding, meta *VerificationMeta) []byte {
 	items := append([]*db.DBFinding(nil), fs...)
 	sortFindingsForExport(items)
 
 	var buf bytes.Buffer
 	buf.WriteString("\xEF\xBB\xBF") // UTF-8 BOM
+	if meta != nil {
+		// 指标以注释行写进 CSV 头部：Excel 会忽略 # 行，脚本 grep 得到。
+		fmt.Fprintf(&buf, "# 验证质量: 可重放率 %.2f%% (%d/%d) | 误报率 %.2f%% (%d/%d) | 判定=环境ground-truth,不接受LLM自报\n",
+			meta.Metrics.ReplayableRate*100, meta.Metrics.Replayable, meta.Metrics.ReplaySample,
+			meta.Metrics.FalsePositiveRate*100, meta.Metrics.Refuted, meta.Metrics.FalsePositiveSample)
+		fmt.Fprintf(&buf, "# 本报告 %d 条,均为 verified;其中可重放 %d 条\n", meta.ExportCount, meta.ExportReplayable)
+	}
 	w := csv.NewWriter(&buf)
-	_ = w.Write([]string{"ID", "名称", "类型", "严重级别", "状态", "所属任务", "发现时间", "概要", "流量证据数量", "流量证据 ID"})
+	_ = w.Write([]string{"ID", "名称", "类型", "严重级别", "状态", "验证状态", "所属任务", "发现时间", "概要", "流量证据数量", "流量证据 ID"})
 	for _, f := range items {
 		_ = w.Write([]string{
 			fmt.Sprintf("%d", f.ID),
@@ -159,6 +209,7 @@ func FindingsCSV(fs []*db.DBFinding) []byte {
 			f.VulnClass,
 			nz(f.Severity, "info"),
 			nz(f.Status, "pending"),
+			nz(f.VerificationStatus, db.VerificationUnverified),
 			f.TaskDescription,
 			f.CreatedAt.Format("2006-01-02 15:04:05"),
 			strings.TrimSpace(f.Summary),

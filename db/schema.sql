@@ -1174,6 +1174,65 @@ CREATE INDEX IF NOT EXISTS idx_finding_traffic_order ON finding_traffic_bindings
 CREATE INDEX IF NOT EXISTS idx_finding_traffic_snapshot ON finding_traffic_bindings(snapshot_id);
 
 -- =====================================================================
+-- L. 验证质量闸门（6.2）：可重放率 + 误报率 + ground-truth 判定
+-- =====================================================================
+-- 发现进入报告前必须过验证闸门。verification_status 是独立于 findings.status
+-- （人工三态流转：待处理/已确认/误报）的第二个轴：status 描述「这条发现怎么处理」，
+-- verification_status 描述「这条发现是否被环境事实证实」。二者故意不复用：
+-- status 可以被 LLM 或人工随手改，verification_status 只接受 ground-truth 判定。
+--
+-- 状态机：unverified → verified | refuted | unreproducible
+--         verified   → refuted | unreproducible      （复核推翻）
+--         refuted    → verified                       （纠错，需带新证据）
+--         unreproducible → verified | refuted         （补齐可复现证据后重判）
+-- verified 不允许直接退回 unverified：撤销要走 refuted（有据可查），
+-- 唯一的降级通道是证据被替换时的系统失效（method='evidence_changed'）。
+ALTER TABLE findings ADD COLUMN IF NOT EXISTS verification_status TEXT NOT NULL DEFAULT 'unverified';
+ALTER TABLE findings ADD COLUMN IF NOT EXISTS verification_method TEXT NOT NULL DEFAULT '';
+ALTER TABLE findings ADD COLUMN IF NOT EXISTS verification_actor  TEXT NOT NULL DEFAULT '';
+ALTER TABLE findings ADD COLUMN IF NOT EXISTS verification_note   TEXT NOT NULL DEFAULT '';
+ALTER TABLE findings ADD COLUMN IF NOT EXISTS verification_ground_truth TEXT NOT NULL DEFAULT '';
+ALTER TABLE findings ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_findings_verification ON findings(verification_status, created_at DESC);
+
+-- 判定流水：每一次状态流转留痕（谁、用什么方法、依据什么环境事实）。
+-- 不加 CHECK 约束，取值由 db.ValidVerificationStatus 白名单校验——与 findings.status 同理。
+CREATE TABLE IF NOT EXISTS finding_verifications (
+    id           BIGSERIAL PRIMARY KEY,
+    finding_id   BIGINT NOT NULL REFERENCES findings(id) ON DELETE CASCADE,
+    from_status  TEXT NOT NULL,
+    to_status    TEXT NOT NULL,
+    method       TEXT NOT NULL,
+    actor        TEXT NOT NULL DEFAULT '',
+    note         TEXT NOT NULL DEFAULT '',
+    ground_truth TEXT NOT NULL DEFAULT '',
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_finding_verifications_finding
+    ON finding_verifications(finding_id, created_at DESC, id DESC);
+
+-- 重放流水：可重放率的事实来源。一行 = 一次真实发出的重放尝试。
+-- replayed=true 表示「凭证据把请求重建出来并拿到了目标响应」；
+-- matches_original 是更强的保真度信号（响应与原始快照逐字节一致），
+-- 可重放率只认前者，保真度单独可查。
+CREATE TABLE IF NOT EXISTS finding_replays (
+    id               BIGSERIAL PRIMARY KEY,
+    finding_id       BIGINT NOT NULL REFERENCES findings(id) ON DELETE CASCADE,
+    binding_id       BIGINT,
+    snapshot_id      TEXT NOT NULL DEFAULT '',
+    replayed         BOOLEAN NOT NULL DEFAULT false,
+    matches_original BOOLEAN NOT NULL DEFAULT false,
+    status_code      INTEGER NOT NULL DEFAULT 0,
+    resp_len         BIGINT NOT NULL DEFAULT 0,
+    resp_sha256      TEXT NOT NULL DEFAULT '',
+    error            TEXT NOT NULL DEFAULT '',
+    elapsed_ms       BIGINT NOT NULL DEFAULT 0,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_finding_replays_finding
+    ON finding_replays(finding_id, created_at DESC, id DESC);
+
+-- =====================================================================
 -- M. 后端日志持久化
 -- =====================================================================
 CREATE TABLE IF NOT EXISTS server_logs (

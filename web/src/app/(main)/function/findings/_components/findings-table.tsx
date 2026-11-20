@@ -246,7 +246,19 @@ export function FindingsTable({
                       <span className="truncate font-medium">{f.name || f.vulnclass || t("table.unclassified")}</span>
                     )}
                     <span className="truncate text-xs text-muted-foreground">{f.summary}</span>
-                    <Badge variant="outline">{t("table.trafficEvidence", { count: f.traffic_count ?? 0 })}</Badge>
+                    <div className="flex flex-wrap items-center gap-1">
+                      <Badge variant="outline">{t("table.trafficEvidence", { count: f.traffic_count ?? 0 })}</Badge>
+                      {/* 6.2 验证闸门：未过闸门的发现不进报告导出，列表里必须一眼看得见。 */}
+                      {(f.verification_status ?? "unverified") !== "verified" && (
+                        <Badge
+                          variant="outline"
+                          className="border-destructive/50 text-destructive"
+                          title={t("verification.pendingGate")}
+                        >
+                          {t("verification.unverified")}
+                        </Badge>
+                      )}
+                    </div>
                   </div>
                 </TableCell>
                 <TableCell>

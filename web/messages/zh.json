@@ -1494,6 +1494,18 @@
         "verification": "补充验证",
         "supporting": "辅助证据"
       }
+    },
+    "verification": {
+      "title": "验证质量",
+      "replayable": "可重放率",
+      "falsePositive": "误报率",
+      "unverified": "未验证",
+      "pendingGate": "未过验证闸门，不进报告",
+      "groundTruth": "判定依据：环境 ground-truth（重放实测/独立复现），不接受 LLM 自报",
+      "verified": "已验证",
+      "refuted": "已推翻",
+      "unreproducible": "不可复现",
+      "sample": "样本"
     }
   },
   "copyButton": {

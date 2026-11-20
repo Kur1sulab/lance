@@ -56,6 +56,7 @@ import type {
   FindingStats,
   FindingStatus,
   Severity,
+  VerificationMetrics,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -170,6 +171,8 @@ function FindingsPageInner() {
   const [total, setTotal] = React.useState(0);
   const [stats, setStats] = React.useState<FindingStats>(EMPTY_STATS);
   const [statsLoaded, setStatsLoaded] = React.useState(false);
+  // 6.2 验证质量指标：可重放率 / 误报率 / 未验证条数。只在有数据时渲染，避免首帧闪 0%。
+  const [verification, setVerification] = React.useState<VerificationMetrics["metrics"] | null>(null);
   const [preferencesHydrated, setPreferencesHydrated] = React.useState(false);
   const [page, setPage] = React.useState(1);
   const [pageSize, setPageSize] = React.useState(10);
@@ -612,8 +615,23 @@ function FindingsPageInner() {
           // Keep the previous aggregate snapshot until the next poll.
         });
     };
+    // 验证质量指标跟统计卡同一个轮询：两条都是全表聚合，一起刷新省一轮请求。
+    const loadVerification = () => {
+      api
+        .verificationMetrics()
+        .then((v) => {
+          if (alive) setVerification(v.metrics);
+        })
+        .catch(() => {
+          // 指标失败不影响列表；保留上一次快照。
+        });
+    };
     load();
-    const t = setInterval(load, 5000);
+    loadVerification();
+    const t = setInterval(() => {
+      load();
+      loadVerification();
+    }, 5000);
     return () => {
       alive = false;
       clearInterval(t);
@@ -1057,6 +1075,40 @@ function FindingsPageInner() {
                   );
                 })}
               </div>
+
+              {/* 6.2 验证质量：两个一等指标 + 未验证条数。未验证的发现不进报告导出
+                  （后端硬拦，见 GET /api/exploration/findings/export 的 409）。 */}
+              {verification && (
+                <Card className="gap-0 py-3">
+                  <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-2 px-4 text-sm">
+                    <span className="font-medium">{t("verification.title")}</span>
+                    <span className="text-muted-foreground">
+                      {t("verification.replayable")}{" "}
+                      <span className="font-semibold tabular-nums text-foreground">
+                        {(verification.replayable_rate * 100).toFixed(1)}%
+                      </span>{" "}
+                      <span className="tabular-nums">
+                        ({verification.replayable}/{verification.replay_sample})
+                      </span>
+                    </span>
+                    <span className="text-muted-foreground">
+                      {t("verification.falsePositive")}{" "}
+                      <span className="font-semibold tabular-nums text-foreground">
+                        {(verification.false_positive_rate * 100).toFixed(1)}%
+                      </span>{" "}
+                      <span className="tabular-nums">
+                        ({verification.refuted}/{verification.false_positive_sample})
+                      </span>
+                    </span>
+                    {verification.unverified > 0 && (
+                      <span className="text-destructive">
+                        {t("verification.unverified")} {verification.unverified} · {t("verification.pendingGate")}
+                      </span>
+                    )}
+                    <span className="ml-auto text-xs text-muted-foreground">{t("verification.groundTruth")}</span>
+                  </CardContent>
+                </Card>
+              )}
 
               {view === "flat" && flatListCard}
 

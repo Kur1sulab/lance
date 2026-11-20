@@ -1494,6 +1494,18 @@
         "verification": "Verificación complementaria",
         "supporting": "Evidencia de apoyo"
       }
+    },
+    "verification": {
+      "title": "Calidad de verificación",
+      "replayable": "Tasa de reproducibilidad",
+      "falsePositive": "Tasa de falsos positivos",
+      "unverified": "Sin verificar",
+      "pendingGate": "No supera la puerta de verificación: excluido de informes",
+      "groundTruth": "Veredictos basados en ground-truth del entorno, nunca en autodeclaraciones del LLM",
+      "verified": "Verificado",
+      "refuted": "Refutado",
+      "unreproducible": "No reproducible",
+      "sample": "muestras"
     }
   },
   "copyButton": {
