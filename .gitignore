@@ -1,0 +1,10 @@
+# 编译产物（各平台二进制，用 `go build -o lance ./` 重新生成）
+/lance
+/lance-*
+
+# 运行时账本与产物（含出站 prompt、动作台账、bench 结果）
+/.lance/
+/lance-ledger.jsonl
+
+# OS
+.DS_Store

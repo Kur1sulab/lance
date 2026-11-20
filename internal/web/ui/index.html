@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>朗基努斯 · Lance 控制台</title>
+<style>
+:root{
+  --bg:#0B0C0E;
+  --panel:rgba(24,24,27,.62);
+  --panel-solid:#15161A;
+  --line:rgba(255,255,255,.08);
+  --line-strong:rgba(255,255,255,.14);
+  --text:#E8E8EA;
+  --muted:#9A9AA2;
+  --faint:#6E6E76;
+  --accent:#5AA9FF;
+  --accent-fill:#0B6BD6;
+  --ok:#34D399;
+  --warn:#F5A524;
+  --bad:#F4525F;
+  --radius:16px;
+  --radius-sm:10px;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;background:var(--bg);color:var(--text);
+  font:14px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Inter,sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+.app{display:grid;grid-template-columns:236px 1fr;min-height:100vh}
+
+/* ---------- 侧栏 ---------- */
+.sidebar{
+  position:sticky;top:0;height:100vh;padding:20px 14px;
+  display:flex;flex-direction:column;gap:18px;
+  border-right:1px solid var(--line);
+  background:linear-gradient(180deg,rgba(255,255,255,.02),transparent 40%);
+}
+.brand{display:flex;align-items:center;gap:11px;padding:2px 6px 6px}
+.logo{
+  width:34px;height:34px;border-radius:11px;flex:none;
+  display:grid;place-items:center;font-weight:700;font-size:16px;color:#fff;
+  background:var(--accent-fill);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.18);
+}
+.brand-txt{min-width:0}
+.brand-txt .name{font-weight:600;font-size:14px;letter-spacing:.2px;display:flex;align-items:center;gap:6px}
+.ver{
+  font:10px/1 var(--mono);color:var(--faint);padding:2px 5px;border:1px solid var(--line);
+  border-radius:5px;letter-spacing:.3px;
+}
+.brand-txt .sub{font-size:11px;color:var(--faint);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+nav{display:flex;flex-direction:column;gap:2px}
+.nav-item{
+  display:flex;align-items:center;gap:9px;width:100%;padding:9px 10px;
+  background:transparent;border:0;border-radius:var(--radius-sm);color:var(--muted);
+  font:inherit;font-size:13px;text-align:left;cursor:pointer;transition:background .14s,color .14s;
+}
+.nav-item:hover{background:rgba(255,255,255,.045);color:var(--text)}
+.nav-item.active{background:rgba(90,169,255,.12);color:var(--text)}
+.nav-item .dot{width:6px;height:6px;border-radius:50%;background:var(--faint);flex:none}
+.nav-item.active .dot{background:var(--accent)}
+.nav-item .badge{
+  margin-left:auto;font:11px/1 var(--mono);color:var(--muted);
+  background:rgba(255,255,255,.06);padding:3px 6px;border-radius:6px;
+}
+.side-title{
+  font-size:10px;letter-spacing:.9px;text-transform:uppercase;color:var(--faint);
+  padding:14px 10px 6px;
+}
+.side-foot{margin-top:auto;display:flex;flex-direction:column;gap:8px;padding:8px 6px 0;border-top:1px solid var(--line)}
+.conn{display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--muted)}
+.conn .dot{width:6px;height:6px;border-radius:50%;background:var(--ok)}
+.conn.bad .dot{background:var(--bad)}
+.ghost{
+  width:100%;padding:8px 10px;font:inherit;font-size:12.5px;color:var(--muted);
+  background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:var(--radius-sm);cursor:pointer;
+}
+.ghost:hover{color:var(--text);border-color:var(--line-strong)}
+
+/* ---------- 主区 ---------- */
+main{padding:22px 26px 40px;min-width:0}
+.head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:18px}
+.head>div:first-child{min-width:0;flex:1}
+.head-actions{flex:none}
+.head h1{margin:0;font-size:19px;font-weight:600;letter-spacing:.2px}
+.head .desc{color:var(--faint);font-size:12.5px;margin-top:4px}
+.head-actions{display:flex;gap:8px;align-items:center}
+
+.view{display:none}
+.view.on{display:block}
+
+/* 毛玻璃面板 */
+.glass{
+  background:var(--panel);
+  -webkit-backdrop-filter:blur(20px) saturate(1.1);
+  backdrop-filter:blur(20px) saturate(1.1);
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 1px 2px rgba(0,0,0,.3);
+}
+
+/* 统计卡 */
+.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:16px}
+.card{padding:16px 18px}
+.card .lab{font-size:11.5px;color:var(--faint);letter-spacing:.3px}
+.card .num{font:600 27px/1.2 var(--mono);margin-top:8px;letter-spacing:-.5px}
+.card .hint{font-size:11.5px;color:var(--muted);margin-top:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* 双栏 */
+.split{display:grid;grid-template-columns:1.15fr 1fr;gap:14px}
+.sec{padding:16px 18px}
+.sec-h{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.sec-h b{font-size:13px;font-weight:600}
+.sec-h span{font-size:11.5px;color:var(--faint)}
+
+/* 严重度分布 */
+.bar{display:flex;height:9px;border-radius:6px;overflow:hidden;background:rgba(255,255,255,.05)}
+.bar i{display:block;height:100%}
+.legend{display:flex;gap:16px;margin-top:12px;flex-wrap:wrap}
+.legend div{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--muted)}
+.legend .dot{width:7px;height:7px;border-radius:50%}
+
+/* 表格 */
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{
+  text-align:left;font-weight:500;font-size:11px;letter-spacing:.4px;color:var(--faint);
+  padding:0 10px 9px;border-bottom:1px solid var(--line);white-space:nowrap;
+}
+td{padding:10px;border-bottom:1px solid rgba(255,255,255,.04);vertical-align:middle}
+tr:last-child td{border-bottom:0}
+tbody tr:hover td{background:rgba(255,255,255,.025)}
+.mono{font-family:var(--mono);font-size:12px}
+.c-id{width:96px}
+.c-check{width:auto}
+.c-sev{width:78px}
+.c-lvl{width:64px}
+.c-target{width:23%}
+.c-state{width:90px}
+.wrap{overflow-wrap:anywhere}
+.chip{
+  display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text);
+  padding:3px 8px;border-radius:7px;background:rgba(255,255,255,.055);border:1px solid var(--line);
+}
+.chip .dot{width:6px;height:6px;border-radius:50%;background:var(--faint)}
+.chip.high .dot{background:var(--bad)}
+.chip.medium .dot{background:var(--warn)}
+.chip.low .dot{background:var(--faint)}
+.chip.ok .dot{background:var(--ok)}
+.chip.err .dot{background:var(--bad)}
+.chip.unk .dot{background:var(--warn)}
+
+/* 控件 */
+.field{display:flex;flex-direction:column;gap:6px}
+.field label{font-size:11.5px;color:var(--faint)}
+input[type=text],input[type=number]{
+  width:100%;padding:9px 11px;font:inherit;font-size:12.5px;color:var(--text);
+  background:rgba(0,0,0,.28);border:1px solid var(--line);border-radius:var(--radius-sm);outline:none;
+}
+input:focus{border-color:rgba(90,169,255,.5)}
+.mono-in{font-family:var(--mono);font-size:12px}
+.seg{display:inline-flex;background:rgba(0,0,0,.28);border:1px solid var(--line);border-radius:var(--radius-sm);padding:3px;gap:3px}
+.seg button{
+  padding:6px 13px;font:inherit;font-size:12.5px;color:var(--muted);background:transparent;
+  border:0;border-radius:7px;cursor:pointer;
+}
+.seg button.on{background:rgba(90,169,255,.16);color:var(--text)}
+.btn{
+  padding:9px 16px;font:inherit;font-size:13px;font-weight:500;color:#fff;
+  background:var(--accent-fill);border:0;border-radius:var(--radius-sm);cursor:pointer;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.14);
+}
+.btn:hover{filter:brightness(1.08)}
+.btn:disabled{opacity:.45;cursor:default;filter:none}
+.btn.sec{background:rgba(255,255,255,.06);color:var(--text);border:1px solid var(--line);box-shadow:none}
+.btn.sec:hover{background:rgba(255,255,255,.1)}
+
+.row{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap}
+.plan{display:flex;flex-direction:column;gap:9px;margin-top:14px}
+.pitem{
+  display:grid;grid-template-columns:26px 94px minmax(0,1fr) auto;gap:8px 12px;align-items:center;
+  padding:11px 13px;border:1px solid var(--line);border-radius:var(--radius-sm);
+  background:rgba(255,255,255,.025);
+}
+.pitem .why{grid-column:3 / -1;font-size:11.5px;color:var(--muted);overflow-wrap:anywhere}
+.pitem .n{font:12px var(--mono);color:var(--faint)}
+.pitem .arg{font-family:var(--mono);font-size:12px;overflow-wrap:anywhere}
+.empty{padding:26px 0;text-align:center;color:var(--faint);font-size:12.5px}
+.tip{font-size:11.5px;color:var(--faint);margin-top:10px;line-height:1.6}
+.tip code{font-family:var(--mono);background:rgba(255,255,255,.06);padding:1px 5px;border-radius:5px}
+.mt{margin-top:16px}
+.result{display:flex;flex-direction:column;gap:8px;margin-top:12px}
+.ritem{display:flex;gap:10px;align-items:center;font-size:12.5px;padding:9px 12px;border-radius:var(--radius-sm);background:rgba(255,255,255,.025);border:1px solid var(--line)}
+.ritem .t{color:var(--faint);font-family:var(--mono);font-size:11.5px;margin-left:auto}
+.note{font-size:12px;color:var(--warn)}
+@media (max-width:1180px){
+  .cards{grid-template-columns:repeat(2,1fr)}
+  .split{grid-template-columns:1fr}
+}
+@media (max-width:820px){
+  .app{grid-template-columns:1fr}
+  .sidebar{position:static;height:auto;display:block;
+    border-right:0;border-bottom:1px solid var(--line);padding:12px 14px}
+  .brand{padding:0 4px 10px}
+  nav{flex-direction:row;flex-wrap:wrap}
+  .nav-item{width:auto}
+  .side-title{display:none}
+  .side-foot{flex-direction:row;align-items:center;justify-content:space-between;
+    border-top:1px solid var(--line);padding-top:10px;margin-top:10px}
+  .ghost{width:auto}
+  main{padding:16px}
+  .head{flex-wrap:wrap}
+}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:6px}
+::-webkit-scrollbar-track{background:transparent}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="logo">L</div>
+      <div class="brand-txt">
+        <div class="name">Lance <span class="ver" id="ver" hidden></span></div>
+        <div class="sub">朗基努斯 · 渗透编排层</div>
+      </div>
+    </div>
+
+    <nav id="nav">
+      <button class="nav-item active" data-v="overview"><span class="dot"></span>总览</button>
+      <button class="nav-item" data-v="findings"><span class="dot"></span>发现<span class="badge" id="b-find">0</span></button>
+      <button class="nav-item" data-v="plan"><span class="dot"></span>编排</button>
+      <button class="nav-item" data-v="ledger"><span class="dot"></span>账本<span class="badge" id="b-led">0</span></button>
+      <div class="side-title">设置</div>
+      <button class="nav-item" data-v="config"><span class="dot"></span>路径与执行器</button>
+    </nav>
+
+    <div class="side-foot">
+      <div class="conn" id="conn"><span class="dot"></span><span id="conn-txt">已连接</span></div>
+      <button class="ghost" id="refresh">重新读取</button>
+    </div>
+  </aside>
+
+  <main>
+    <div class="head">
+      <div>
+        <h1 id="vtitle">总览</h1>
+        <div class="desc" id="vdesc">决策与执行分离：这里只出计划，按下才动手</div>
+      </div>
+      <div class="head-actions">
+        <span class="chip" id="chip-findings"><span class="dot"></span><span class="wrap" style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" id="find-path">未配置</span></span>
+      </div>
+    </div>
+
+    <!-- 总览 -->
+    <section class="view on" id="v-overview">
+      <div class="cards">
+        <div class="card glass"><div class="lab">发现</div><div class="num" id="s-find">0</div><div class="hint" id="s-high">高危 0</div></div>
+        <div class="card glass"><div class="lab">待复验</div><div class="num" id="s-pend">0</div><div class="hint">账本里没有对应 replay</div></div>
+        <div class="card glass"><div class="lab">已复验</div><div class="num" id="s-ver">0</div><div class="hint">按签名匹配账本</div></div>
+        <div class="card glass"><div class="lab">动作流水</div><div class="num" id="s-act">0</div><div class="hint" id="s-round">第 1 轮</div></div>
+      </div>
+
+      <div class="split">
+        <div class="sec glass">
+          <div class="sec-h"><b>严重度分布</b><span id="dist-note">—</span></div>
+          <div class="bar" id="dist-bar"></div>
+          <div class="legend" id="dist-legend"></div>
+          <div class="tip">分布只统计 findings.json 里已有的条目；没有数据就是没有数据，不做估算。</div>
+        </div>
+        <div class="sec glass">
+          <div class="sec-h"><b>最近动作</b><span>按时间倒序</span></div>
+          <div id="recent"><div class="empty">账本还是空的</div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 发现 -->
+    <section class="view" id="v-findings">
+      <div class="glass" style="padding:16px 18px">
+        <div class="sec-h"><b>发现清单</b><span id="find-count">0 条</span></div>
+        <table>
+          <thead><tr>
+            <th class="c-id">ID</th><th class="c-check">检查项</th><th class="c-sev">严重度</th>
+            <th class="c-lvl">等级</th><th class="c-target">目标</th><th class="c-state">复验</th>
+          </tr></thead>
+          <tbody id="find-body"><tr><td colspan="6"><div class="empty">还没有 findings.json</div></td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 编排 -->
+    <section class="view" id="v-plan">
+      <div class="glass" style="padding:16px 18px">
+        <div class="sec-h"><b>生成计划</b><span>决策层只输出动作，不接触目标</span></div>
+        <div class="row">
+          <div class="field">
+            <label>决策器</label>
+            <div class="seg" id="seg-brain">
+              <button data-b="rules" class="on">rules</button>
+              <button data-b="llm">llm</button>
+            </div>
+          </div>
+          <div class="field" style="width:130px">
+            <label>本轮预算</label>
+            <input type="number" id="budget" value="8" min="1" max="32">
+          </div>
+          <button class="btn" id="btn-next">生成计划</button>
+        </div>
+        <div class="note" id="brain-note"></div>
+        <div class="plan" id="plan"></div>
+        <div id="exec-wrap" hidden>
+          <div class="row mt">
+            <button class="btn" id="btn-exec">执行这份计划</button>
+            <button class="btn sec" id="btn-clear">清空</button>
+          </div>
+          <div class="tip">执行会真实调用 litmus（replay / run 模板），并把结果写进账本。动作参数走白名单，执行器不经 shell。</div>
+          <div class="result" id="result"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 账本 -->
+    <section class="view" id="v-ledger">
+      <div class="glass" style="padding:16px 18px">
+        <div class="sec-h"><b>决策与执行账本</b><span id="led-count">0 条</span></div>
+        <table>
+          <thead><tr>
+            <th class="c-id">时间</th><th class="c-lvl">轮次</th><th class="c-lvl">动作</th>
+            <th class="c-check">签名</th><th class="c-state">结果</th><th class="c-target">理由</th>
+          </tr></thead>
+          <tbody id="led-body"><tr><td colspan="6"><div class="empty">账本还是空的</div></td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 配置 -->
+    <section class="view" id="v-config">
+      <div class="glass" style="padding:16px 18px">
+        <div class="sec-h"><b>路径与执行器</b><span>写进状态目录的 serve.json，重启沿用</span></div>
+        <div class="field"><label>findings.json</label>
+          <input class="mono-in" type="text" id="cfg-find" placeholder="/path/to/findings.json"></div>
+        <div class="field mt"><label>litmus 可执行文件</label>
+          <input class="mono-in" type="text" id="cfg-litmus" placeholder="litmus 或 /path/to/litmus2"></div>
+        <div class="row mt"><button class="btn" id="btn-save">保存</button><span class="note" id="cfg-note"></span></div>
+        <div class="tip">findings.json 结构：<code>{"findings":[{id,check,severity,level,confidence,target}],"coverage":[{item,state,reason}]}</code></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+var S = {state:null, plan:null, brain:"rules"};
+var SEV = {critical:"严重", high:"高危", medium:"中危", low:"低危", info:"信息"};
+var VERD = {reproduced:"仍可复现", gone:"已消失", unverified:"无法确认", error:"执行失败"};
+var $ = function(id){ return document.getElementById(id); };
+
+function esc(s){
+  return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){
+    return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
+  });
+}
+function sevChip(s){
+  var k = String(s||"").toLowerCase();
+  var cls = k==="high"||k==="critical" ? "high" : (k==="medium" ? "medium" : "low");
+  return '<span class="chip '+cls+'"><span class="dot"></span>'+esc(SEV[k]||s||"—")+'</span>';
+}
+function verdChip(v){
+  var k = String(v||"");
+  var cls = k==="reproduced" ? "ok" : (k==="error" ? "err" : (k==="gone" ? "" : "unk"));
+  return '<span class="chip '+cls+'"><span class="dot"></span>'+esc(VERD[k]||v||"—")+'</span>';
+}
+
+function load(){
+  return fetch("/api/state").then(function(r){ return r.json(); }).then(function(s){
+    S.state = s;
+    $("conn").className = "conn";
+    $("conn-txt").textContent = "已连接";
+    if (s.version){ $("ver").textContent = "v"+s.version; $("ver").hidden = false; }
+    var fp = s.config && s.config.findings ? s.config.findings : "";
+    $("find-path").textContent = fp || "未配置 findings.json";
+    $("find-path").title = fp;
+    $("chip-findings").className = "chip" + (fp ? "" : " err");
+    render();
+  }).catch(function(e){
+    $("conn").className = "conn bad";
+    $("conn-txt").textContent = "连接断开";
+  });
+}
+
+function render(){
+  var s = S.state; if (!s) return;
+  var st = s.stats || {};
+  $("s-find").textContent = st.findings || 0;
+  $("s-high").textContent = "高危 " + (st.high || 0);
+  $("s-pend").textContent = st.pending || 0;
+  $("s-ver").textContent = st.verified || 0;
+  $("s-act").textContent = st.actions || 0;
+  $("s-round").textContent = "第 " + (st.round || 1) + " 轮";
+  $("b-find").textContent = st.findings || 0;
+  $("b-led").textContent = st.actions || 0;
+
+  var fs = s.findings || [], led = s.ledger || [];
+  var done = {};
+  led.forEach(function(r){ if (done[r.signature] === undefined) done[r.signature] = r.verdict; });
+
+  // 严重度分布
+  var cnt = {critical:0,high:0,medium:0,low:0,info:0,other:0};
+  fs.forEach(function(f){ var k = String(f.severity||"").toLowerCase(); (cnt[k] !== undefined ? cnt[k]++ : cnt.other++); });
+  var total = fs.length || 1;
+  var order = ["critical","high","medium","low","info","other"];
+  var color = {critical:"var(--bad)",high:"var(--bad)",medium:"var(--warn)",low:"var(--faint)",info:"rgba(255,255,255,.18)",other:"rgba(255,255,255,.1)"};
+  $("dist-bar").innerHTML = fs.length ? order.map(function(k){
+    return cnt[k] ? '<i style="width:'+(cnt[k]/total*100).toFixed(1)+'%;background:'+color[k]+'"></i>' : "";
+  }).join("") : "";
+  $("dist-legend").innerHTML = fs.length ? order.filter(function(k){ return cnt[k]; }).map(function(k){
+    var lab = k === "other" ? "未标注" : (SEV[k] || k);
+    return '<div><span class="dot" style="background:'+color[k]+'"></span>'+esc(lab)+' '+cnt[k]+'</div>';
+  }).join("") : '<div style="color:var(--faint);font-size:12px">没有数据</div>';
+  $("dist-note").textContent = fs.length ? "共 " + fs.length + " 条" : "—";
+
+  // 最近动作
+  $("recent").innerHTML = led.length ? led.slice(0,6).map(function(r){
+    return '<div class="ritem">'+verdChip(r.verdict)+
+      '<span class="mono wrap">'+esc(r.signature||"—")+'</span>'+
+      '<span class="t">'+(r.ts ? esc(String(r.ts).slice(11,19)) : "")+'</span></div>';
+  }).join("") : '<div class="empty">账本还是空的</div>';
+
+  // 发现表
+  $("find-count").textContent = fs.length + " 条";
+  $("find-body").innerHTML = fs.length ? fs.map(function(f){
+    var v = done["replay:"+f.id];
+    var cell = v ? verdChip(v) : '<span class="chip"><span class="dot"></span>未复验</span>';
+    return '<tr><td class="mono">'+esc(f.id)+'</td><td class="wrap">'+esc(f.check)+'</td>'+
+      '<td>'+sevChip(f.severity)+'</td><td class="mono">'+esc(f.level||"—")+'</td>'+
+      '<td class="mono wrap">'+esc(f.target||"—")+'</td><td>'+cell+'</td></tr>';
+  }).join("") : '<tr><td colspan="6"><div class="empty">还没有 findings.json</div></td></tr>';
+
+  // 账本表
+  $("led-count").textContent = led.length + " 条";
+  $("led-body").innerHTML = led.length ? led.map(function(r){
+    return '<tr><td class="mono">'+esc(String(r.ts||"").replace("T"," ").slice(0,19))+'</td>'+
+      '<td class="mono">'+(r.round||"—")+'</td><td class="mono">'+esc(r.kind||"—")+'</td>'+
+      '<td class="mono wrap">'+esc(r.signature||"—")+'</td><td>'+verdChip(r.verdict)+'</td>'+
+      '<td class="wrap" style="color:var(--muted)">'+esc(r.why||r.detail||"")+'</td></tr>';
+  }).join("") : '<tr><td colspan="6"><div class="empty">账本还是空的</div></td></tr>';
+
+  // 配置回填
+  if (s.config){
+    if (!$("cfg-find").value) $("cfg-find").value = s.config.findings || "";
+    if (!$("cfg-litmus").value) $("cfg-litmus").value = s.config.litmus || "";
+  }
+  if (s.load_error) $("find-path").textContent = "读取失败：" + s.load_error;
+}
+
+// 视图切换
+document.getElementById("nav").addEventListener("click", function(e){
+  var b = e.target.closest(".nav-item"); if (!b) return;
+  document.querySelectorAll(".nav-item").forEach(function(n){ n.classList.remove("active"); });
+  b.classList.add("active");
+  var v = b.getAttribute("data-v");
+  document.querySelectorAll(".view").forEach(function(s){ s.classList.toggle("on", s.id === "v-"+v); });
+  var titles = {overview:["总览","决策与执行分离：这里只出计划，按下才动手"],
+                findings:["发现","findings.json 里的条目，复验状态按账本签名匹配"],
+                plan:["编排","选决策器 → 看计划 → 再按下；不按就不动手"],
+                ledger:["账本","每条决策的理由与每条执行的结果，全部可回放"],
+                config:["路径与执行器","findings.json 与 litmus 的位置"]};
+  $("vtitle").textContent = titles[v][0];
+  $("vdesc").textContent = titles[v][1];
+});
+
+// 决策器分段
+$("seg-brain").addEventListener("click", function(e){
+  var b = e.target.closest("button"); if (!b) return;
+  this.querySelectorAll("button").forEach(function(x){ x.classList.remove("on"); });
+  b.classList.add("on");
+  S.brain = b.getAttribute("data-b");
+});
+
+// 生成计划
+$("btn-next").addEventListener("click", function(){
+  var btn = this; btn.disabled = true; btn.textContent = "生成中…";
+  fetch("/api/next", {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({brain:S.brain, budget: parseInt($("budget").value,10)||8})
+  }).then(function(r){
+    if (!r.ok) return r.text().then(function(t){ throw new Error(t); });
+    return r.json();
+  }).then(function(p){
+    S.plan = p;
+    $("brain-note").textContent = (p.label && p.label !== p.brain) ? p.label : "";
+    renderPlan(p);
+    load();
+  }).catch(function(e){
+    $("plan").innerHTML = '<div class="note">'+esc(e.message)+'</div>';
+    $("exec-wrap").hidden = true;
+  }).then(function(){
+    btn.disabled = false; btn.textContent = "生成计划";
+  });
+});
+
+function renderPlan(p){
+  var acts = p.actions || [];
+  if (!acts.length){
+    $("plan").innerHTML = '<div class="empty">这一轮没有动作</div>';
+    $("exec-wrap").hidden = true; return;
+  }
+  $("plan").innerHTML = acts.map(function(a,i){
+    var arg = a.kind === "replay" ? (a.args && a.args.id || "")
+            : (a.kind === "run_tpl" ? ((a.args && a.args.target || "") + "  " + (a.args && a.args.tpl || "")) : (a.target || ""));
+    return '<div class="pitem"><span class="n">'+(i+1)+'</span>'+
+      '<span class="chip"><span class="dot"></span>'+esc(a.kind)+'</span>'+
+      '<div class="arg">'+esc(arg||"—")+'</div>'+
+      '<span class="mono" style="color:var(--muted);font-size:11.5px">'+(a.conf != null ? Number(a.conf).toFixed(2) : "")+'</span>'+
+      '<div class="why">'+esc(a.why||"")+'</div></div>';
+  }).join("");
+  $("exec-wrap").hidden = false;
+}
+
+// 执行
+$("btn-exec").addEventListener("click", function(){
+  if (!S.plan) return;
+  var btn = this; btn.disabled = true; btn.textContent = "执行中…";
+  $("result").innerHTML = "";
+  fetch("/api/exec", {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({brain:S.plan.brain || S.brain, actions:S.plan.actions})
+  }).then(function(r){ return r.json(); }).then(function(o){
+    if (!o.ok){ $("result").innerHTML = '<div class="note">'+esc(o.error||"执行失败")+'</div>'; return; }
+    $("result").innerHTML = (o.results||[]).map(function(r){
+      return '<div class="ritem">'+verdChip(r.verdict)+
+        '<span class="mono wrap">'+esc(r.signature||"")+'</span>'+
+        '<span style="color:var(--muted)">'+esc(r.detail||"")+'</span>'+
+        '<span class="t">'+(r.seconds||0).toFixed(1)+'s</span></div>';
+    }).join("") + '<div class="tip">第 '+(o.round||"")+' 轮已写入账本：<code>'+esc(o.ledger||"")+'</code></div>';
+    load();
+  }).catch(function(e){
+    $("result").innerHTML = '<div class="note">'+esc(e.message)+'</div>';
+  }).then(function(){
+    btn.disabled = false; btn.textContent = "执行这份计划";
+  });
+});
+
+$("btn-clear").addEventListener("click", function(){
+  S.plan = null; $("plan").innerHTML = ""; $("result").innerHTML = ""; $("exec-wrap").hidden = true;
+});
+
+// 保存配置
+$("btn-save").addEventListener("click", function(){
+  var btn = this; btn.disabled = true;
+  fetch("/api/config", {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({findings:$("cfg-find").value.trim(), litmus:$("cfg-litmus").value.trim()})
+  }).then(function(r){ return r.json(); }).then(function(o){
+    $("cfg-note").textContent = o.ok ? "已保存" : "保存失败";
+    if (o.ok) load();
+    setTimeout(function(){ $("cfg-note").textContent = ""; }, 2400);
+  }).then(function(){ btn.disabled = false; });
+});
+
+$("refresh").addEventListener("click", load);
+load();
+setInterval(function(){ if (!$("v-plan").classList.contains("on")) load(); }, 8000);
+</script>
+</body>
+</html>
