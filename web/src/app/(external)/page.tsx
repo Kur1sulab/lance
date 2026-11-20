@@ -18,15 +18,10 @@ import { auth } from "@/lib/auth";
 
 const VERSION = "2.2.0";
 
-// logo 取自 public/logo.svg：四角切括号 + 斜穿长枪 + 实心枪头。
-const CORNERS = [
-  "M220,680 L220,220 L680,220",
-  "M1240,220 L1700,220 L1700,680",
-  "M1700,1240 L1700,1700 L1240,1700",
-  "M680,1700 L220,1700 L220,1240",
-];
-const SHAFT = "M400,1690 L1200,540";
-const TIP = "M1327,360 L1306,615 L1200,540 L1094,465 Z";
+// logo 与 public/logo.svg 同一套路径：劈开楔形。
+// 缝占 2.6%（够细，读作一块料被劈开），右半上移 1.6%（给方向感），左半 78%。
+const MARK_R = "M132 6 L234 216 L132 186 Z";
+const MARK_L = "M125 14 L30 216 L125 194 Z";
 
 const STEPS = [
   ["01", "定目标", "描述测试对象与要达成什么"],
@@ -149,11 +144,11 @@ const css = `
 /* ── Hero ── */
 .lp-hero { padding: clamp(48px, 8vw, 104px) clamp(18px, 4vw, 56px) clamp(40px, 6vw, 72px); }
 .lp-hero-mark { width: clamp(74px, 9vw, 116px); height: auto; display: block; }
-.lp-hero-mark .s { fill: none; stroke: var(--lp-red-bright); stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 1; stroke-dashoffset: 1; animation: lp-draw 1.35s cubic-bezier(.6,0,.2,1) .12s forwards; filter: drop-shadow(0 0 14px var(--lp-red-dim)); }
-.lp-hero-mark .f { fill: var(--lp-red-bright); opacity: 0; animation: lp-tip .45s ease-out 1.3s forwards; }
+.lp-hero-mark .mk-r { animation: lp-rise .7s cubic-bezier(.2,.7,.2,1) .1s both; }
+.lp-hero-mark .mk-l { animation: lp-rise .7s cubic-bezier(.2,.7,.2,1) .22s both; }
 /* 顶栏小标：不做绘制动画，纯描边红 */
-.lp-brand svg .s { fill: none; stroke: var(--lp-red-bright); stroke-linecap: round; stroke-linejoin: round; }
-.lp-brand svg .f { fill: var(--lp-red-bright); }
+.lp-brand svg .mk-r { fill: var(--lp-red-bright); }
+.lp-brand svg .mk-l { fill: var(--lp-red-bright); opacity: .78; }
 @keyframes lp-draw { to { stroke-dashoffset: 0; } }
 @keyframes lp-tip { to { opacity: 1; } }
 
@@ -245,28 +240,15 @@ const css = `
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .lp-hero-mark .s { animation: none; stroke-dashoffset: 0; }
-  .lp-hero-mark .f { animation: none; opacity: 1; }
+  .lp-hero-mark .mk-r, .lp-hero-mark .mk-l { animation: none; }
 }
 `;
 
 function Mark({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 1920 1920" role="img" aria-label="Lance">
-      <g>
-        {CORNERS.map((d, i) => (
-          <path
-            key={i}
-            d={d}
-            pathLength={1}
-            className="s"
-            strokeWidth={90}
-            style={{ animationDelay: `${0.12 + i * 0.1}s` }}
-          />
-        ))}
-        <path d={SHAFT} pathLength={1} className="s" strokeWidth={120} style={{ animationDelay: "0.55s" }} />
-      </g>
-      <path d={TIP} className="f" />
+    <svg className={className} viewBox="0 0 264 240" role="img" aria-label="Lance">
+      <path d={MARK_R} fill="currentColor" className="mk-r" />
+      <path d={MARK_L} fill="currentColor" className="mk-l" opacity={0.78} />
     </svg>
   );
 }
