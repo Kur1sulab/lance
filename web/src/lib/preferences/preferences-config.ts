@@ -73,7 +73,9 @@ export const PREFERENCE_DEFAULTS: PreferenceValueMap = {
   content_layout: "full-width",
   navbar_style: "sticky",
   sidebar_variant: "inset",
-  sidebar_collapsible: "offcanvas",
+  // icon：收起后保留图标轨、hover 可展开。offcanvas 会把侧栏整个移出屏幕
+  // （width=0），收起状态等于「功能全消失」，与指挥舱布局本意不符。
+  sidebar_collapsible: "icon",
 };
 
 /**

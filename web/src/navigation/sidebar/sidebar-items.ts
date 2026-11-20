@@ -131,8 +131,11 @@ export const sidebarItems: NavGroup[] = [
   },
 ];
 
-/** 侧边栏折叠状态持久化键；值形如 {"1":true,"4":false}。 */
-export const SIDEBAR_GROUP_STORAGE_KEY = "lance-sidebar-groups";
+/** 侧边栏折叠状态持久化键；值形如 {"1":true,"4":false}。
+ *  v2：默认值从「只展开作战」改为「全展开」，键升版以丢弃旧的 {1:true} 存量，
+ *  否则老用户永远看不到被折叠的 19 个条目。 */
+export const SIDEBAR_GROUP_STORAGE_KEY = "sidebarOpenGroupsV2";
 
-/** 默认只展开「作战」，其余域折叠。 */
-export const DEFAULT_OPEN_GROUP_ID = 1;
+/** 默认展开的域：全部。分组只是导航手段，不该成为「功能看不见」的门槛——
+ *  用户手动收起的域会写进 storage，后续刷新尊重用户的选择。 */
+export const DEFAULT_OPEN_GROUP_IDS: readonly number[] = [1, 2, 3, 4, 5];

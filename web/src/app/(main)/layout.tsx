@@ -45,8 +45,10 @@ export default function Layout({ children }: Readonly<{ children: ReactNode }>) 
     }
   }, []);
 
-  // 指挥舱布局：默认收起成图标轨，靠 hover 展开，把横向空间留给数据
-  const defaultOpen = typeof document === "undefined" ? false : getClientCookie("sidebar_state") === "true";
+  // 导航是功能入口，不是装饰：无 cookie 时默认展开，只有用户明确关过才收起。
+  // 原先默认收起成「图标轨」的设计在 offcanvas 折叠模式下会把侧栏整个移出屏幕
+  // （width=0，hover 展不开），23 个入口首屏完全不可见，只剩一个 ☰。
+  const defaultOpen = typeof document === "undefined" ? true : getClientCookie("sidebar_state") !== "false";
   const variant = readPref<SidebarVariant>(
     "sidebar_variant",
     SIDEBAR_VARIANT_VALUES,

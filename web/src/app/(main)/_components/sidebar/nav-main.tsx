@@ -32,7 +32,7 @@ import {
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import {
-  DEFAULT_OPEN_GROUP_ID,
+  DEFAULT_OPEN_GROUP_IDS,
   type NavBadge,
   type NavGroup,
   type NavMainItem,
@@ -184,7 +184,7 @@ export function NavMain({ items }: NavMainProps) {
   const isGroupOpen = (group: NavGroup) => {
     // 侧边栏收成图标条时所有域都必须摊开，否则非默认域里的页面整片消失。
     if (sidebarState === "collapsed" && !isMobile) return true;
-    return openGroups?.[String(group.id)] ?? group.id === DEFAULT_OPEN_GROUP_ID;
+    return openGroups?.[String(group.id)] ?? DEFAULT_OPEN_GROUP_IDS.includes(group.id);
   };
 
   const setGroupOpen = (groupId: number, open: boolean) => {
