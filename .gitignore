@@ -99,3 +99,6 @@ secrets.env
 /.qa/
 # 构建前备份的旧二进制（各 37 MB）
 /lance.bak-*
+
+# 评测层运行产物（每次运行一个目录：靶日志、scorecard、证据），不提交
+/eval/runs/

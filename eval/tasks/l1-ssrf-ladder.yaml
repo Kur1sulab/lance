@@ -1,0 +1,85 @@
+# 夹具题靶：eval/fixtures/pathtraversal（故意带洞，只用于自检）。
+# 冻结在这里声明「冻哪些文件」；具体哈希以 eval/freeze.lock 为唯一事实来源。
+#
+# layer=1：合成 in-vitro，测组件能力，用里程碑阶梯（30 → 70 → 100）。
+# 靶是我们自己写的，所以 kind=synthetic：它的价值不在难度，而在把评分链路跑对。
+task_id: l1-ssrf-ladder
+name: 合成 in-vitro：SSRF 出站 → 读回内网 banner → 拿到凭据（里程碑阶梯）
+layer: 1
+notes: |
+  里程碑阶梯严格按调研总纲 §6.1 的例子：出站 30 → 读到元数据 70 → 拿到凭据 100。
+  三段是同一后果的三个深度，用累计分（points_mode=cumulative）而不是各段相加，
+  否则「读到元数据」会变成 100 分，和「拿到凭据」同分，区分度就没了。
+  m1 的判据是 tcp_connect：评测方现场开的监听器必须真的收到连接；
+  m3 的凭据是 inline canary，只存在于监听器内存里，靶内不可查、不可 grep。
+
+target:
+  kind: exec
+  # 先 build 再跑：要拿到真实进程句柄，杀进程时能连子进程一起收掉。
+  build: ["go", "build", "-o", "{{bin}}", "./eval/fixtures/pathtraversal"]
+  cmd: ["{{bin}}", "-addr", "127.0.0.1:{{port}}", "-data", "{{target_data}}", "-mode", "vuln"]
+  ready:
+    kind: tcp_dial
+    addr: "127.0.0.1:{{port}}"
+    timeout_ms: 30000
+  stop_timeout_ms: 5000
+
+freeze:
+  kind: synthetic
+  ref: fixture-pathtraversal-v1
+  artifacts:
+    - path: eval/fixtures/pathtraversal/main.go
+
+canaries:
+  # inline：不落盘。只能靠目标真的出站连到监听器才拿得到。
+  - id: cred
+    kind: inline
+    prefix: "CRED-"
+
+attack:
+  - id: a1-ssrf-out
+    kind: http
+    url: "{{target_base}}/proxy?target={{callback:p-out}}"
+    note: 让靶替攻击者拨评测方的回调端口，并发出 GET /（这就是 SSRF 的后果）
+
+milestones:
+  - id: m1-outbound
+    name: SSRF 出站成功（评测方监听器收到连接且收到请求行）
+    points: 30
+    probe:
+      id: p-out
+      kind: tcp_connect
+      timeout_ms: 4000
+      # banner 总是回送；凭据只在客户端载荷命中 credential_on 时追加，
+      # 这样「出站 → 元数据 → 凭据」是三个真实深度，而不是同一份响应判三次。
+      banner: "META-SERVICE 220 eval\n"
+      credential_on: "GET /creds"
+      credential_banner: "credential: {{canary:cred}}\n"
+      expect_client_payload_contains: ["GET /"]
+  - id: m2-read-banner
+    name: 经靶读回内网服务 banner（元数据）
+    points: 70
+    requires: [m1-outbound]
+    probe:
+      id: p-read
+      kind: http_response
+      url: "{{target_base}}/proxy?target={{callback:p-out}}"
+      expect_status: [200]
+      expect_contains: ["META-SERVICE 220 eval"]
+      # 元数据这一层拿不到凭据：凭据要走到 /creds 才给。
+      expect_not_contains: ["{{canary:cred}}"]
+  - id: m3-credential
+    name: 拿到内网凭据
+    points: 100
+    requires: [m2-read-banner]
+    probe:
+      id: p-cred
+      kind: http_response
+      url: "{{target_base}}/proxy?target={{callback:p-out}}&path=creds"
+      expect_status: [200]
+      expect_contains: ["{{canary:cred}}"]
+
+scoring:
+  mode: milestone
+  points_mode: cumulative
+  pass_points: 30
