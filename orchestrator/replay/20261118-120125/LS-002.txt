@@ -1,0 +1,2 @@
+GET /.git/HEAD → HTTP 200
+ref: refs/heads/main

@@ -1,0 +1,2 @@
+[word] 命中词 ['propertySources']/1
+[dsl] DSL ['status_code == 200', 'len(body) > 100'] → [True, True]

@@ -1,0 +1,1097 @@
+{
+  "findings": [
+    {
+      "id": "ab1b8451c964ec130ad03ef1858654322696c1b4",
+      "check": "web.injection",
+      "severity": "critical",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "efcb8635094bf79d1dcb217908c41c9186a19579",
+      "check": "crypto.weak",
+      "severity": "high",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "5a9eac384c5336e9bf229e2af4b9c31d40aa9d91",
+      "check": "crypto.weak",
+      "severity": "high",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "5ed9efa9dbe219215e5abfacf6b08ac700540e65",
+      "check": "web.other",
+      "severity": "high",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "751fbcd6fcfff60afbe99ea06e5ae2a7ea60712a",
+      "check": "web.other",
+      "severity": "high",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "c8b270600b268fdc9ef36b3386f45710540e1399",
+      "check": "web.info_leak",
+      "severity": "high",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "f89c9b5cb59133b818004f8a8a7cd40fa3ff83fe",
+      "check": "web.info_leak",
+      "severity": "high",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "fb319fcf3ec239ecb833e4dba34cde6dcbb38ce8",
+      "check": "web.other",
+      "severity": "high",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "1b4347967b92a22c8227043856943d3653475a28",
+      "check": "web.info_leak",
+      "severity": "high",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "42384cea22c1c19381a1c0169e5739c46123f082",
+      "check": "web.other",
+      "severity": "medium",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "62efec768fce4cf69af269d386b0c63538bdc7a4",
+      "check": "web.other",
+      "severity": "medium",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "d82912351eeffa94d8e917565f4cafd059de1cfd",
+      "check": "web.info_leak",
+      "severity": "medium",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "2d662d06a4ea9a25144497cff4ba3240148a2d30",
+      "check": "web.other",
+      "severity": "medium",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "6d8b6cef03649558b8dbf6d2def32d1cd8715dcf",
+      "check": "web.other",
+      "severity": "medium",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "868a9082cf738b6525cc1a4703bb1e8434805f52",
+      "check": "web.other",
+      "severity": "medium",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "f73b2df324e735f0fc3c5527098e2598aa4b5497",
+      "check": "web.other",
+      "severity": "medium",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "ce2e0be28dd4422827119106f05e694853df9e5d",
+      "check": "web.other",
+      "severity": "medium",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "b2073305bed1457221980a6f2debde71e37ebe78",
+      "check": "crypto.weak",
+      "severity": "medium",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "5d2cbbe0760c3e42d0b5f9aaf782249159018ac3",
+      "check": "web.other",
+      "severity": "medium",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "1eaddb93f5352253fbb676226db00f8b291eccc1",
+      "check": "web.other",
+      "severity": "medium",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "34ee88a8fb61decb5140a6638650aec69b62ac58",
+      "check": "web.other",
+      "severity": "medium",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "320c8f710111875f92e618b8e5309da312334c90",
+      "check": "web.other",
+      "severity": "medium",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "2b0dc942e5dd580c456e8cd72e35e908fb80972e",
+      "check": "web.other",
+      "severity": "medium",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "f03360b6aa97566868af28a6bb9612e374c8db06",
+      "check": "web.other",
+      "severity": "medium",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "a9e75f68689ce0452c58707c7316a4816ecba724",
+      "check": "web.other",
+      "severity": "low",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "9e068c51d53df4da52a1f662260484b2fe60f55d",
+      "check": "crypto.weak",
+      "severity": "low",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "0fae6efec6cff8b54765292372884621d2037dbf",
+      "check": "web.other",
+      "severity": "low",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "0d35a35a75da67a2a1e91f73237fc1557ff8ffed",
+      "check": "web.other",
+      "severity": "low",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "a0e4d2e6666564a5f2e74fe8827f2d53cebc23b7",
+      "check": "web.other",
+      "severity": "low",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "24dd1260327d95c4770985771976892bc32ebd90",
+      "check": "crypto.weak",
+      "severity": "info",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "b951df69e8927e41a441ee3bcb2bbcaacf700cb5",
+      "check": "web.other",
+      "severity": "info",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "62633b6745753eeca2c2aac810b595c9b53a2494",
+      "check": "web.other",
+      "severity": "info",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "c487c4a70c53a6b547fb25427f4eb035fa314c88",
+      "check": "web.other",
+      "severity": "info",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "f5b1d964d1b8ab27fbf23e65501289dd1a0bb605",
+      "check": "web.other",
+      "severity": "info",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "82ee6cdda5a11160850af42d182779b888779cc1",
+      "check": "web.other",
+      "severity": "critical",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "490c9d7a4dac44900817b0705279ae285a4b6fe4",
+      "check": "crypto.weak",
+      "severity": "critical",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "a5c06856bd814d7230c38019960e9d8f5a0f9422",
+      "check": "crypto.weak",
+      "severity": "critical",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "97a7bce20d35362680ed46656f4b9aa9dffb7c36",
+      "check": "web.other",
+      "severity": "critical",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "caba5443077b57bac9fbe433a6787bdf6e7b88da",
+      "check": "web.other",
+      "severity": "high",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "d38f3c7e184c2f8216dbe7c51b21d897320c4ffe",
+      "check": "crypto.weak",
+      "severity": "high",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "c99160cbbaa2668dc93c3bdeea68c994fe5f1712",
+      "check": "web.other",
+      "severity": "high",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "2987fdf7ba271502bcd5be3a40d256ba363e4325",
+      "check": "web.other",
+      "severity": "medium",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "1b1ea392f939d7b93ab81b25056c007c0cdd6835",
+      "check": "web.other",
+      "severity": "medium",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "1763040e024a090cffe3d4e18490615d5ce4b201",
+      "check": "web.other",
+      "severity": "medium",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "ec7bb59d6678a4279053669d005726eb59440c2c",
+      "check": "crypto.weak",
+      "severity": "low",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "6b40027237f00781e6eee116ecf1deb419e8a2de",
+      "check": "crypto.weak",
+      "severity": "high",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "6953f775b656bd261fbcc9fecea131ff4c145bc8",
+      "check": "crypto.weak",
+      "severity": "high",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "80083b0558255224461b2a3604e4da0bfc10987a",
+      "check": "crypto.weak",
+      "severity": "high",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "2dc676fd8ca8f044eac43d024c2140db6dfdbf36",
+      "check": "web.other",
+      "severity": "high",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "a14979539496df8adcc95e971bb170b9532e58c9",
+      "check": "web.other",
+      "severity": "high",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "f5cfbb7d9c61fe598dcc4c360d37cec20a4bd35f",
+      "check": "web.other",
+      "severity": "medium",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "a7ce4421520488bc49a332d2bc25e85e26e1aac0",
+      "check": "web.other",
+      "severity": "medium",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "aa5dccbf744f5d90fd142dd4c0b98c568c9e9ed6",
+      "check": "web.other",
+      "severity": "medium",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "6bc688d508982b734e4f910112bb93c7f12822e9",
+      "check": "web.other",
+      "severity": "medium",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "858a85d0b47c0f4a98bf7329560c9716b8817110",
+      "check": "web.info_leak",
+      "severity": "medium",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "5be85e808a70656acabbc01b694098a84bc886d2",
+      "check": "web.other",
+      "severity": "medium",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "95b6354c1ee1c2548ac6573f531d7ad4c0aa657a",
+      "check": "auth.weak_password",
+      "severity": "high",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.32.204"
+    },
+    {
+      "id": "7d882b0a0f0e3fd7686c2917b606126f7e910705",
+      "check": "web.unauthorized",
+      "severity": "medium",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.32.204"
+    },
+    {
+      "id": "9a7df7151c3aef7f89633976d0a81da31312ab2a",
+      "check": "web.info_leak",
+      "severity": "high",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.32.204"
+    },
+    {
+      "id": "2977e04a34f9ef21807943f5acb3dbdd4006f4a9",
+      "check": "web.other",
+      "severity": "low",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "66d35278886b1ddc43a9006d76d44a3d73c32d4f",
+      "check": "web.info_leak",
+      "severity": "low",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.32.204"
+    },
+    {
+      "id": "7e08960ea4afc56de30aa33a701bca2cf9943fa6",
+      "check": "web.unauthorized",
+      "severity": "medium",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.32.204"
+    },
+    {
+      "id": "35a40c01bb6776dc4dce6e13e432eda91f08c4a3",
+      "check": "web.other",
+      "severity": "medium",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "689e1d791dcfe8570b2908a43451912b1f9bd935",
+      "check": "web.unauthorized",
+      "severity": "medium",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.32.204"
+    },
+    {
+      "id": "a7a2df9ae24278479e593d389e127ccf092b96d1",
+      "check": "auth.weak_password",
+      "severity": "high",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.33.2"
+    },
+    {
+      "id": "7d3f1dda3c9159c6c5798ff849f5e57a3f753f7e",
+      "check": "auth.weak_password",
+      "severity": "high",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.34.111"
+    },
+    {
+      "id": "6671ac580c34a16fb7a0cd5b2b9a301d56168772",
+      "check": "web.unauthorized",
+      "severity": "medium",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.34.111"
+    },
+    {
+      "id": "6bf911fcb0a585d359c159724b52740d8f9a84ae",
+      "check": "web.other",
+      "severity": "medium",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.34.111"
+    },
+    {
+      "id": "1083b3cd80d8cc10e5febde95a4fc8366111c27a",
+      "check": "auth.weak_password",
+      "severity": "high",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.34.111"
+    },
+    {
+      "id": "47fb5dcba60d1eca9cccd451d4fbd9b649912062",
+      "check": "web.unauthorized",
+      "severity": "medium",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.34.111"
+    },
+    {
+      "id": "b58c9bce94c07feb8ddfdd4f23c0e9c7d37fc42e",
+      "check": "web.unauthorized",
+      "severity": "medium",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.34.111"
+    },
+    {
+      "id": "97bbbd23a2b241993366e32feb3c8e8bf2e8c9bd",
+      "check": "auth.weak_password",
+      "severity": "high",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.128.158"
+    },
+    {
+      "id": "556fad376f7108a95d0d08180ac807b5fa0e9728",
+      "check": "web.unauthorized",
+      "severity": "medium",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.128.158"
+    },
+    {
+      "id": "a30bba32168561ff6edd63d23ef66e33129843c8",
+      "check": "auth.weak_password",
+      "severity": "high",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.32.57"
+    },
+    {
+      "id": "d5627b17a35eb124339bedde863718631ea84143",
+      "check": "web.unauthorized",
+      "severity": "medium",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.32.57"
+    },
+    {
+      "id": "70260d1e572abd3ee4a31395f03e933af0ae81fe",
+      "check": "web.unauthorized",
+      "severity": "medium",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.32.57"
+    },
+    {
+      "id": "b24178361c19a8b8849ce45a0e9eba61b9ed7b3e",
+      "check": "auth.weak_password",
+      "severity": "high",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.32.57"
+    },
+    {
+      "id": "33d48dee0bd2533b47c8ff91bd9f792c74e42568",
+      "check": "web.unauthorized",
+      "severity": "medium",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.32.57"
+    },
+    {
+      "id": "2eba01a6f4ef9696686f078b94c058d5dde3ba36",
+      "check": "web.info_leak",
+      "severity": "low",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "25.66.171.89"
+    },
+    {
+      "id": "26fcb2f9fc682356b8e04a38faf2646e03e12554",
+      "check": "auth.weak_password",
+      "severity": "high",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.34.200"
+    },
+    {
+      "id": "adea5216f1bf709c46f4cfb146780a2914df3445",
+      "check": "web.unauthorized",
+      "severity": "medium",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.34.200"
+    },
+    {
+      "id": "76a27da60a48bda70697d32867e8fd4da0f94f30",
+      "check": "web.unauthorized",
+      "severity": "medium",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.34.200"
+    },
+    {
+      "id": "e284bb9c8c40d6a4f392bb22e17a1dfb47ece060",
+      "check": "auth.weak_password",
+      "severity": "high",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.34.200"
+    },
+    {
+      "id": "84e2b52b4ccbde43bff809a25919521a858029b7",
+      "check": "web.unauthorized",
+      "severity": "medium",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.34.200"
+    },
+    {
+      "id": "101cd682c0cc7e6662049d1b8c12fa6a95d6ceb5",
+      "check": "auth.weak_password",
+      "severity": "high",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.32.204"
+    },
+    {
+      "id": "ea77e316f9224bc8b0426744e724b8a6e5f86de8",
+      "check": "web.info_leak",
+      "severity": "high",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.32.204"
+    },
+    {
+      "id": "993477bed8fc31c25b82969f320109619253e7c6",
+      "check": "auth.weak_password",
+      "severity": "high",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.33.2"
+    },
+    {
+      "id": "1b11194c0c2ff72a0b64639a768202fb4472f373",
+      "check": "web.other",
+      "severity": "medium",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.33.2"
+    },
+    {
+      "id": "fb7600747e34c7f4908c5f9eac911eb78839c2dc",
+      "check": "web.unauthorized",
+      "severity": "medium",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.32.204"
+    },
+    {
+      "id": "ea65dda2ec90d758d8e55944d150f2d1d06777cd",
+      "check": "web.unauthorized",
+      "severity": "medium",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.32.204"
+    },
+    {
+      "id": "b7769848ac7cf80381562043bd71d24985c131f0",
+      "check": "web.unauthorized",
+      "severity": "medium",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.32.204"
+    },
+    {
+      "id": "5d2292d26a74400aebfcde5e3279835f970e5e24",
+      "check": "web.info_leak",
+      "severity": "low",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.32.204"
+    },
+    {
+      "id": "f2c535ec9fcb6fdd43d995c7fd0b00738329df22",
+      "check": "auth.weak_password",
+      "severity": "high",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.34.111"
+    },
+    {
+      "id": "29fbbcbd9173af3e578eb89a9e95ef64e0dfc9e8",
+      "check": "auth.weak_password",
+      "severity": "high",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.34.111"
+    },
+    {
+      "id": "a39fd7740791331f63bed770c95ca58bd1b95444",
+      "check": "web.unauthorized",
+      "severity": "medium",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.34.111"
+    },
+    {
+      "id": "5aa6732e817009e5115d8fd87828092599d42102",
+      "check": "web.other",
+      "severity": "medium",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.34.111"
+    },
+    {
+      "id": "828a9f44151bdf30e47a8ce7f2c25c94e91e4651",
+      "check": "web.unauthorized",
+      "severity": "medium",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.34.111"
+    },
+    {
+      "id": "689a64c4f34056a59755381c14cbd01349e0eeb0",
+      "check": "web.unauthorized",
+      "severity": "medium",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.34.111"
+    },
+    {
+      "id": "65a25c6d79d84d2aa4a9e00cf1d965f9804a4533",
+      "check": "auth.weak_password",
+      "severity": "high",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.128.158"
+    },
+    {
+      "id": "9a2e4192833bcc84f60bbaefafde3973966e0af6",
+      "check": "web.unauthorized",
+      "severity": "medium",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.128.158"
+    },
+    {
+      "id": "63760a22a2463598e69c6a8274170add227b1c1e",
+      "check": "auth.weak_password",
+      "severity": "high",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.32.57"
+    },
+    {
+      "id": "b5233a79937581d902daaae8ab250a77ba820c4d",
+      "check": "auth.weak_password",
+      "severity": "high",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.32.57"
+    },
+    {
+      "id": "c505e0d3c53eab3385a1ed9318fe44f8290b5799",
+      "check": "web.unauthorized",
+      "severity": "medium",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.32.57"
+    },
+    {
+      "id": "faa6f298751735605d1784eb44545fbd08abe61e",
+      "check": "web.unauthorized",
+      "severity": "medium",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.32.57"
+    },
+    {
+      "id": "cfdec5da4bb6ca6f849856e2be24e20bcbcd549b",
+      "check": "web.unauthorized",
+      "severity": "medium",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.32.57"
+    },
+    {
+      "id": "75a8fb0e32d7d3c0148806aa882e0c6b58856665",
+      "check": "web.info_leak",
+      "severity": "low",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "25.66.171.89"
+    },
+    {
+      "id": "a1101e6798137d70c43c43de07a847a32091a0fc",
+      "check": "auth.weak_password",
+      "severity": "high",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.34.200"
+    },
+    {
+      "id": "1b1216e285917bd946489e6513baec942fee13e8",
+      "check": "auth.weak_password",
+      "severity": "high",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.34.200"
+    },
+    {
+      "id": "020c32ef6c7222fef468217d6ab8e68827549dad",
+      "check": "web.unauthorized",
+      "severity": "medium",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.34.200"
+    },
+    {
+      "id": "e52650e9992827996ce3339b1a0075aa1eca6e2d",
+      "check": "web.unauthorized",
+      "severity": "medium",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.34.200"
+    },
+    {
+      "id": "b58798eb0bacd5a127a2608e10281bc67472cd81",
+      "check": "web.unauthorized",
+      "severity": "medium",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "10.71.34.200"
+    },
+    {
+      "id": "dd51740590010ba998928732d38ae7be1d27fac3",
+      "check": "web.other",
+      "severity": "critical",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "94d26be2b1602fa50593c6761922e138732df8bf",
+      "check": "crypto.weak",
+      "severity": "critical",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "118a786651a45d5bb4d64afc6820355ec3d5815b",
+      "check": "web.other",
+      "severity": "critical",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "052ebc468941168895768c806346bf98bb708aee",
+      "check": "web.other",
+      "severity": "high",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "b258a7f416223600cb2c34891cf23e9892256781",
+      "check": "web.other",
+      "severity": "high",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "f17c34765284edd0a56b93c7671064f0eb91c319",
+      "check": "web.other",
+      "severity": "medium",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "9ef2c7d285c9e510d842a5dc54adf108ba9279ad",
+      "check": "web.other",
+      "severity": "high",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "8b01baed4d6e5340e25dd188d67f06a67e80eeb8",
+      "check": "web.other",
+      "severity": "high",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "e63084c95e142ba9ca450fb9685ac8ec279ef3ae",
+      "check": "web.other",
+      "severity": "medium",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "88ec4a51a159aaf55f5934a5eeb7e3ae3a46edfc",
+      "check": "web.other",
+      "severity": "medium",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "c78bb4133c512b7b8309dee7ac822c0de505f41b",
+      "check": "web.other",
+      "severity": "medium",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "a60d098ca5bc39b6f507f3d49a0a47dd19269c69",
+      "check": "web.other",
+      "severity": "info",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "128e70ae1dc3425fc87bd3503321f31190e8d520",
+      "check": "web.other",
+      "severity": "info",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "29d6d3a2503f9b299e51d2bfb634f5c17d1430a6",
+      "check": "web.other",
+      "severity": "info",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "c27294167ca92e0b397474e8933d743b34b3dfe2",
+      "check": "web.other",
+      "severity": "low",
+      "level": "L1",
+      "confidence": "reported",
+      "target": "-"
+    },
+    {
+      "id": "eebdc533a2715594add89d4656178b814dce0f0c",
+      "check": "web.other",
+      "severity": "high",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "127.0.0.1"
+    },
+    {
+      "id": "db1a845d7f6f329a45d86dd4e9415dde883deeb6",
+      "check": "auth.weak_password",
+      "severity": "critical",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "127.0.0.1"
+    },
+    {
+      "id": "475b86f7f0ccdf1358f66bfd2a9ce51f1c976bd1",
+      "check": "web.info_leak",
+      "severity": "high",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "127.0.0.1"
+    },
+    {
+      "id": "fcf17fa8a08d4e051187979e6a5fb0f327eec24c",
+      "check": "web.info_leak",
+      "severity": "critical",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "127.0.0.1"
+    },
+    {
+      "id": "f64e0645ae1a401a55aa9e4723d79d7799d05b41",
+      "check": "web.other",
+      "severity": "low",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "127.0.0.1"
+    },
+    {
+      "id": "386df89a30193d44356bb9b72db7b2a62a7cd6ba",
+      "check": "web.info_leak",
+      "severity": "info",
+      "level": "L3",
+      "confidence": "reported",
+      "target": "127.0.0.1"
+    }
+  ],
+  "coverage": [
+    {
+      "item": "检查类型 web.other",
+      "state": "hit",
+      "reason": "59 条命中"
+    },
+    {
+      "item": "检查类型 web.unauthorized",
+      "state": "hit",
+      "reason": "26 条命中"
+    },
+    {
+      "item": "检查类型 auth.weak_password",
+      "state": "hit",
+      "reason": "19 条命中"
+    },
+    {
+      "item": "检查类型 web.info_leak",
+      "state": "hit",
+      "reason": "14 条命中"
+    },
+    {
+      "item": "检查类型 crypto.weak",
+      "state": "hit",
+      "reason": "13 条命中"
+    },
+    {
+      "item": "检查类型 web.injection",
+      "state": "hit",
+      "reason": "1 条命中"
+    },
+    {
+      "item": "复验覆盖",
+      "state": "gap",
+      "reason": "132/132 条从未复验（verify_state 为空）"
+    }
+  ]
+}
