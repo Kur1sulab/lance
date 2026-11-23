@@ -23,8 +23,8 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"lance/internal/action"
-	"lance/internal/brain"
+	"github.com/Kur1sulab/lance/orchestrator/internal/action"
+	"github.com/Kur1sulab/lance/orchestrator/internal/brain"
 )
 
 // 档位状态。unavailable 与 error 分开：前者是「没配置，预期回落」，

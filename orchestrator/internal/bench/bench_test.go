@@ -13,8 +13,8 @@ import (
 	"strings"
 	"testing"
 
-	"lance/internal/action"
-	"lance/internal/brain"
+	"github.com/Kur1sulab/lance/orchestrator/internal/action"
+	"github.com/Kur1sulab/lance/orchestrator/internal/brain"
 )
 
 // fakeBrain 让测试不依赖网络与真实模型：想让它出什么决策就出什么。

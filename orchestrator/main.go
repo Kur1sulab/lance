@@ -21,12 +21,12 @@ import (
 	"strings"
 	"time"
 
-	"lance/internal/action"
-	"lance/internal/bench"
-	"lance/internal/brain"
-	"lance/internal/exec"
-	"lance/internal/state"
-	"lance/internal/web"
+	"github.com/Kur1sulab/lance/orchestrator/internal/action"
+	"github.com/Kur1sulab/lance/orchestrator/internal/bench"
+	"github.com/Kur1sulab/lance/orchestrator/internal/brain"
+	"github.com/Kur1sulab/lance/orchestrator/internal/exec"
+	"github.com/Kur1sulab/lance/orchestrator/internal/state"
+	"github.com/Kur1sulab/lance/orchestrator/internal/web"
 )
 
 // version 是产品版本号，与 README 同步维护。

@@ -4,6 +4,12 @@
 
 后端 Go 单二进制（前端静态资源已内嵌），数据层 PostgreSQL，界面默认中文。
 
+> **两套 Go 代码，同一个产品（一个产品一个仓库）：**
+> - **仓库根** —— 渗透测试平台：控制台 + 多智能体（planner / worker / reporter）+ 资产图 + 流量录制 + 审批拦截。
+> - **[`orchestrator/`](orchestrator/)** —— 独立的**编排层**（v1.4.0）：只产出 action JSON、从不接触目标的决策进程，与 litmus2 执行层解耦，可单独 `go build` 与复用。
+>
+> 两者各带自己的 `go.mod`（嵌套 module），父模块 `go build ./...` 会自动跳过 `orchestrator/`。
+
 ---
 
 ## 它做什么

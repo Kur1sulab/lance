@@ -11,7 +11,7 @@ package brain
 import (
 	"context"
 
-	"lance/internal/action"
+	"github.com/Kur1sulab/lance/orchestrator/internal/action"
 )
 
 type Finding struct {

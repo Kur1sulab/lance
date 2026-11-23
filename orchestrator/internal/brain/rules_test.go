@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"lance/internal/action"
+	"github.com/Kur1sulab/lance/orchestrator/internal/action"
 )
 
 // rerun 的两条规则要守住：一轮只派一条（整批重扫，多派等于重复扫同一批目标），

@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"lance/internal/action"
+	"github.com/Kur1sulab/lance/orchestrator/internal/action"
 )
 
 // Rules 是零依赖的规则决策器：不联网、不需要模型，现场断网也能用。

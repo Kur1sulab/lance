@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"lance/internal/action"
-	"lance/internal/sanitize"
+	"github.com/Kur1sulab/lance/orchestrator/internal/action"
+	"github.com/Kur1sulab/lance/orchestrator/internal/sanitize"
 )
 
 // LLM 走 OpenAI 兼容的 /chat/completions，只用标准库。

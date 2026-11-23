@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"lance/internal/action"
+	"github.com/Kur1sulab/lance/orchestrator/internal/action"
 )
 
 type Verdict string

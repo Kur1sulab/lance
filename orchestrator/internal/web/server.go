@@ -19,10 +19,10 @@ import (
 	"sync"
 	"time"
 
-	"lance/internal/action"
-	"lance/internal/brain"
-	"lance/internal/exec"
-	"lance/internal/state"
+	"github.com/Kur1sulab/lance/orchestrator/internal/action"
+	"github.com/Kur1sulab/lance/orchestrator/internal/brain"
+	"github.com/Kur1sulab/lance/orchestrator/internal/exec"
+	"github.com/Kur1sulab/lance/orchestrator/internal/state"
 )
 
 //go:embed ui/index.html

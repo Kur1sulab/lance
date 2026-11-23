@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"lance/internal/action"
+	"github.com/Kur1sulab/lance/orchestrator/internal/action"
 )
 
 // 这些用例守 rerun 的三条底线：
